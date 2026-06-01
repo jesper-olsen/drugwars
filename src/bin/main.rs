@@ -1,0 +1,1060 @@
+// Drug Wars - A faithful Rust recreation of John E. Dell's 1984 DOS original
+// Reconstructed from the DOS executable strings and TI-BASIC port logic.
+// Copyright (1984) John E. Dell. This recreation is for preservation purposes.
+
+use std::fmt;
+use std::io::{self, Write};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+// ─── RNG ─────────────────────────────────────────────────────────────────────
+struct Rng {
+    state: u64,
+}
+impl Rng {
+    fn new(seed: u64) -> Self {
+        Rng { state: seed }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self
+            .state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        self.state
+    }
+
+    fn next_f64(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    fn range(&mut self, lo: i64, hi: i64) -> i64 {
+        lo + (self.next_f64() * (hi - lo + 1) as f64) as i64
+    }
+
+    fn bool(&mut self) -> bool {
+        self.range(0, 1) == 1
+    }
+}
+
+// ─── CONSTANTS ───────────────────────────────────────────────────────────────
+#[derive(Clone, Copy)]
+enum Drug {
+    Cocain = 0,
+    Heroin,
+    Acid,
+    Weed,
+    Speed,
+    Ludes,
+}
+
+impl fmt::Display for Drug {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Drug::Cocain => "COCAIN",
+            Drug::Heroin => "HEROIN",
+            Drug::Acid => "ACID",
+            Drug::Weed => "WEED",
+            Drug::Speed => "SPEED",
+            Drug::Ludes => "LUDES",
+        };
+        f.pad(s)?;
+        Ok(())
+    }
+}
+
+const DRUGS: [Drug; 6] = [Cocain, Heroin, Acid, Weed, Speed, Ludes];
+use Drug::*;
+
+const DRUG_PRICES: [(i64, i64); 6] = [
+    (15000, 30000),
+    (5000, 14000),
+    (1000, 4500),
+    (300, 900),
+    (70, 250),
+    (10, 60),
+];
+
+#[derive(Clone, Copy, PartialEq)]
+enum Location {
+    Bronx = 0,
+    Ghetto,
+    CentralPark,
+    Manhattan,
+    ConeyIsland,
+    Brooklyn,
+}
+
+impl fmt::Display for Location {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Location::Bronx => "BRONX",
+            Location::Ghetto => "GHETTO",
+            Location::CentralPark => "CENTRAL PARK",
+            Location::Manhattan => "MANHATTAN",
+            Location::ConeyIsland => "CONEY ISLAND",
+            Location::Brooklyn => "BROOKLYN",
+        };
+        f.pad(s)?;
+        Ok(())
+    }
+}
+const LOCATIONS: [Location; 6] = [
+    Location::Bronx,
+    Location::Ghetto,
+    Location::CentralPark,
+    Location::Manhattan,
+    Location::ConeyIsland,
+    Location::Brooklyn,
+];
+
+const GUNS: [(&str, i64); 4] = [
+    ("SATURDAY NIGHT SPECIAL", 400),
+    ("RUGER", 400),
+    (".38 SPECIAL", 400),
+    ("BARETTA", 400),
+];
+
+const GAME_DAYS: u32 = 30;
+const TRENCH_UPGRADE_COST: i64 = 200;
+const TRENCH_UPGRADE_SLOTS: i64 = 10;
+const DOCTOR_COST: i64 = 1000;
+const MAX_DAMAGE: i32 = 10;
+const LOAN_INTEREST: f64 = 0.10;
+const STARTING_CASH: i64 = 2000;
+const STARTING_DEBT: i64 = 5500;
+const MAX_BORROW: i64 = 5000;
+
+// ─── STATE ───────────────────────────────────────────────────────────────────
+struct G {
+    cash: i64,
+    bank: i64,
+    debt: i64,
+    day: u32,
+    loc: Location,
+    coat_size: i64,
+    stash: [i64; 6],
+    coat: [i64; 6],
+    guns: u32,
+    damage: i32,
+    prices: [i64; 6],
+}
+impl G {
+    fn new() -> Self {
+        G {
+            cash: STARTING_CASH,
+            bank: 0,
+            debt: STARTING_DEBT,
+            day: 1,
+            loc: Location::Ghetto,
+            coat_size: 100,
+            stash: [0; 6],
+            coat: [0; 6],
+            guns: 0,
+            damage: 0,
+            prices: [0; 6],
+        }
+    }
+    fn free(&self) -> i64 {
+        self.coat_size - self.coat.iter().sum::<i64>()
+    }
+    fn total(&self) -> i64 {
+        self.coat.iter().sum()
+    }
+}
+
+// ─── I/O ─────────────────────────────────────────────────────────────────────
+fn cls() {
+    print!("\x1B[2J\x1B[H");
+    let _ = io::stdout().flush();
+}
+
+fn pause() {
+    print!("\n  (PRESS ENTER TO CONTINUE)");
+    let _ = io::stdout().flush();
+    rl();
+}
+
+fn rl() -> String {
+    let mut s = String::new();
+    let _ = io::stdin().read_line(&mut s);
+    s.trim().to_uppercase()
+}
+
+fn ri(prompt: &str) -> Option<i64> {
+    print!("  {}: ", prompt);
+    let _ = io::stdout().flush();
+    rl().parse().ok()
+}
+
+fn div() {
+    println!("  ──────────────────────────────────────────────");
+}
+
+fn hdr(t: &str) {
+    println!();
+    println!("  ╔══════════════════════════════════════════╗");
+    println!("  ║  {:40}║", t);
+    println!("  ╚══════════════════════════════════════════╝");
+    println!();
+}
+
+// ─── PRICES ──────────────────────────────────────────────────────────────────
+fn gen_prices(r: &mut Rng) -> [i64; 6] {
+    std::array::from_fn(|i| {
+        //let mut p = [0i64; 6];
+        //for i in 0..6 {
+        let (lo, hi) = DRUG_PRICES[i];
+        r.range(lo, hi)
+    })
+}
+
+// ─── DISPLAY ─────────────────────────────────────────────────────────────────
+fn show_status(g: &G) {
+    println!("  DAY {} / {}    LOCATION: {}", g.day, GAME_DAYS, g.loc);
+    div();
+    println!("  CASH  {:<14} BANK  {}", money(g.cash), money(g.bank));
+    println!(
+        "  DEBT  {:<14} GUNS  {}   DAMAGE {}/{}",
+        money(g.debt),
+        g.guns,
+        g.damage,
+        MAX_DAMAGE
+    );
+    println!(
+        "  HOLD  {}/{}  (FREE: {})",
+        g.total(),
+        g.coat_size,
+        g.free()
+    );
+    div();
+}
+fn show_prices(g: &G) {
+    println!("  HEY DUDE, THE PRICES OF DRUGS HERE ARE:");
+    println!();
+    for drug in DRUGS {
+        let price = money(g.prices[drug as usize]);
+        println!("    {drug:<12} {price:>8}");
+    }
+    println!();
+}
+
+fn money(n: i64) -> String {
+    let sign = if n < 0 { "-" } else { "" };
+    let s = n.abs().to_string();
+
+    let mut out = String::new();
+    for (i, ch) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+
+    format!("{}${}", sign, out.chars().rev().collect::<String>())
+}
+
+fn show_coat(g: &G) {
+    println!("  TRENCH COAT:");
+    println!();
+    let mut any = false;
+    for drug in DRUGS {
+        if g.coat[drug as usize] > 0 {
+            println!("    {drug:<12} {}", g.coat[drug as usize]);
+            any = true;
+        }
+    }
+    if !any {
+        println!("    (empty)");
+    }
+    println!("    {:<12} {}", "FREE SPACE", g.free());
+    println!();
+}
+fn show_stash(g: &G) {
+    println!("  STASH (BRONX):");
+    println!();
+    let mut any = false;
+    for drug in DRUGS {
+        if g.stash[drug as usize] > 0 {
+            println!("    {drug:<12} {}", g.stash[drug as usize]);
+            any = true;
+        }
+    }
+    if !any {
+        println!("    (empty)");
+    }
+    println!();
+}
+
+// ─── RANDOM EVENTS ───────────────────────────────────────────────────────────
+fn events(g: &mut G, r: &mut Rng) -> bool {
+    // returns true = dead
+    let d = r.range(0, 20);
+    match d {
+        1 => {
+            cls();
+            hdr("!! SPECIAL BULLETIN !!");
+            println!("  COPS MADE A BIG COKE BUST !!\n  PRICES ARE OUTRAGEOUS !!");
+            g.prices[Drug::Cocain as usize] = r.range(80_000, 140_000);
+            pause();
+        }
+        2 => {
+            cls();
+            hdr("!! SPECIAL BULLETIN !!");
+            println!(
+                "  COLOMBIAN FREIGHTER DUSTED THE COAST GUARD !!\n  WEED PRICES HAVE BOTTOMED OUT !!"
+            );
+            g.prices[Drug::Weed as usize] = r.range(40, 100);
+            pause();
+        }
+        3 if g.total() > 0 => {
+            cls();
+            hdr("!! BUSTED !!");
+            let bl = r.range(2, 6);
+            println!("  POLICE DOGS CHASE YOU FOR {} BLOCKS !!", bl);
+            println!("  YOU DROPPED SOME DRUGS !!  THAT'S A DRAG MAN !!");
+            let pct = r.range(10, 30);
+            for drug in DRUGS {
+                let d = (g.coat[drug as usize] * pct / 100).max(0);
+                g.coat[drug as usize] = (g.coat[drug as usize] - d).max(0);
+            }
+            pause();
+        }
+        4 if g.coat[Drug::Weed as usize] > 0 || g.stash[Drug::Weed as usize] > 0 => {
+            cls();
+            hdr("OH NO !!");
+            println!("  YOUR MAMA MADE SOME BROWNIES AND USED YOUR WEED !!\n  THEY WERE GREAT !!");
+            if g.coat[Drug::Weed as usize] > 0 {
+                g.coat[Drug::Weed as usize] = 0;
+            } else {
+                g.stash[Drug::Weed as usize] = 0;
+            }
+            pause();
+        }
+        5 => {
+            cls();
+            hdr("!! SPECIAL BULLETIN !!");
+            println!("  PIGS ARE SELLING CHEAP HEROIN FROM LAST WEEK'S RAID !!");
+            g.prices[Drug::Heroin as usize] = r.range(850, 2000);
+            pause();
+        }
+        6 => {
+            let free = g.free();
+            if free >= 3 {
+                let amt = r.range(3, 8).min(free);
+                let di = r.range(0, 5) as usize;
+                cls();
+                hdr("LUCKY FIND !!");
+                println!("  YOU FIND {} UNITS OF {}", amt, DRUGS[di]);
+                println!("  ON A DEAD DUDE IN THE SUBWAY !!");
+                g.coat[di] += amt;
+                pause();
+            }
+        }
+        7 => {
+            cls();
+            hdr("DANGER !!");
+            println!("  THERE IS SOME WEED THAT SMELLS LIKE PARAQUAT HERE !!");
+            println!("  IT LOOKS GOOD !!");
+            print!("\n  WILL YOU SMOKE IT ? (Y/N): ");
+            let _ = io::stdout().flush();
+            if rl().starts_with('Y') {
+                cls();
+                println!(
+                    "  YOU HALUCINATE FOR THREE DAYS ON THE WILDEST TRIP YOU EVER IMAGINED !!!"
+                );
+                println!("\n  THEN YOU DIE BECAUSE YOUR BRAIN HAS DISINTEGRATED !!!");
+                pause();
+                return true;
+            }
+        }
+        8 => {
+            cls();
+            hdr("!! SPECIAL BULLETIN !!");
+            println!(
+                "  RIVAL DRUG DEALERS RAIDED A PHARMACY AND ARE SELLING  C H E A P   L U D E S  !!!"
+            );
+            g.prices[Drug::Ludes as usize] = r.range(2, 8);
+            pause();
+        }
+        9 => {
+            cls();
+            hdr("!! SPECIAL BULLETIN !!");
+            println!("  ADDICTS ARE BUYING HEROIN AT OUTRAGEOUS PRICES !!");
+            g.prices[Drug::Heroin as usize] = r.range(18_000, 43_000);
+            pause();
+        }
+        10 => {
+            cls();
+            hdr("!! SPECIAL BULLETIN !!");
+            println!("  THE MARKET HAS BEEN FLOODED WITH CHEAP HOME MADE ACID !!!");
+            g.prices[Drug::Acid as usize] = r.range(250, 800);
+            pause();
+        }
+        11 => {
+            cls();
+            hdr("OH NO !!");
+            let lost = g.cash / 3;
+            g.cash -= lost;
+            println!(
+                "  YOU WERE MUGGED IN THE SUBWAY !!\n  YOU LOST ${} !!",
+                lost
+            );
+            pause();
+        }
+        12 | 13 if g.cash >= TRENCH_UPGRADE_COST => {
+            cls();
+            hdr("OPPORTUNITY !!");
+            println!("  WILL YOU BUY A NEW TRENCH COAT WITH MORE POCKETS");
+            print!("  FOR {} ? (Y/N): ", money(TRENCH_UPGRADE_COST));
+            let _ = io::stdout().flush();
+            if rl().starts_with('Y') {
+                g.coat_size += TRENCH_UPGRADE_SLOTS;
+                g.cash -= TRENCH_UPGRADE_COST;
+                println!("  NEW COAT: {} POCKETS !", g.coat_size);
+                pause();
+            }
+        }
+        14 | 15 if g.cash >= 400 => {
+            let gi = r.range(0, 3) as usize;
+            let (gn, gp) = GUNS[gi];
+            cls();
+            hdr("OPPORTUNITY !!");
+            println!("  WILL YOU BUY A {} FOR ${} ?", gn, gp);
+            print!("  (Y/N): ");
+            let _ = io::stdout().flush();
+            if rl().starts_with('Y') && g.cash >= gp {
+                g.guns += 1;
+                g.cash -= gp;
+                g.coat_size = (g.coat_size - 5).max(g.total());
+                println!("  YOU NOW HAVE {} GUN(S).", g.guns);
+                pause();
+            }
+        }
+        _ => {}
+    }
+    false
+}
+
+// ─── POLICE ENCOUNTER ────────────────────────────────────────────────────────
+fn police(g: &mut G, r: &mut Rng) -> bool {
+    // true = dead/arrested
+    if g.total() < 5 {
+        return false;
+    }
+    let nd = r.range(1, 4) as u32;
+    let mut cops = nd + 1;
+    cls();
+    hdr("POLICE ENCOUNTER !!");
+    println!(
+        "  OFFICER HARDASS AND {} OF HIS DEPUTIES ARE CHASING YOU !!!!!",
+        nd
+    );
+    pause();
+
+    loop {
+        cls();
+        div();
+        println!("  DAMAGE  {} / {}", g.damage, MAX_DAMAGE);
+        println!("  COPS    {}", cops);
+        println!("  GUNS    {}", g.guns);
+        div();
+        println!();
+        print!("  WILL YOU [R]UN OR [F]IGHT ? (R/F): ");
+        let _ = io::stdout().flush();
+        let ch = rl();
+
+        if ch.starts_with('R') {
+            cls();
+            if r.bool() {
+                println!("  YOU LOST THEM IN THE ALLEYS !!");
+                pause();
+                offer_doctor(g);
+                return false;
+            } else {
+                println!("  YOU CAN'T LOSE THEM !!");
+                pause();
+                if cops_shoot(g, r, cops) {
+                    return true;
+                }
+            }
+        } else if ch.starts_with('F') {
+            cls();
+            println!("  YOU'RE FIRING ON THEM !!!");
+            if g.guns == 0 {
+                println!("  BUT YOU DON'T HAVE ANY GUNS !!");
+                pause();
+                if cops_shoot(g, r, cops) {
+                    return true;
+                }
+            } else if r.bool() {
+                println!("  YOU KILLED ONE !!");
+                cops -= 1;
+                if cops == 0 {
+                    let bounty = r.range(500, 2000);
+                    g.cash += bounty;
+                    cls();
+                    println!("  YOU KILLED ALL OF THEM !!!!");
+                    println!("\n  YOU FOUND ${} ON OFFICER HARDASS' CARCAS !!!", bounty);
+                    pause();
+                    offer_doctor(g);
+                    return false;
+                }
+                pause();
+                if cops_shoot(g, r, cops) {
+                    return true;
+                }
+            } else {
+                println!("  YOU MISSED THEM !!");
+                pause();
+                if cops_shoot(g, r, cops) {
+                    return true;
+                }
+            }
+        }
+    }
+}
+
+fn offer_doctor(g: &mut G) {
+    if g.damage > 0 && g.cash >= DOCTOR_COST {
+        cls();
+        print!(
+            "  WILL YOU PAY ${} TO HAVE A DOCTOR SEW YOU UP ? (Y/N): ",
+            DOCTOR_COST
+        );
+        let _ = io::stdout().flush();
+        if rl().starts_with('Y') {
+            g.cash -= DOCTOR_COST;
+            g.damage = 0;
+            println!("  THE DOCTOR PATCHES YOU UP !");
+            pause();
+        }
+    }
+}
+
+fn cops_shoot(g: &mut G, r: &mut Rng, cops: u32) -> bool {
+    cls();
+    println!("  THEY ARE FIRING ON YOU MAN !!");
+    let mut hit = false;
+    for _ in 0..cops {
+        if r.bool() {
+            hit = true;
+            break;
+        }
+    }
+    if hit {
+        println!("  YOU'VE BEEN HIT !!");
+        g.damage += 1;
+        if g.damage >= MAX_DAMAGE {
+            println!("\n  THEY WASTED YOU MAN !!!  WHAT A DRAG !!!");
+            pause();
+            return true;
+        }
+    } else {
+        println!("  THEY MISSED !!");
+    }
+    pause();
+    false
+}
+
+// ─── ACTIONS ─────────────────────────────────────────────────────────────────
+fn buy(g: &mut G) {
+    cls();
+    hdr("BUY DRUGS");
+    show_prices(g);
+    show_coat(g);
+    if g.free() == 0 {
+        println!("  YOUR TRENCH COAT IS FULL !");
+        pause();
+        return;
+    }
+    println!("  WHAT WILL YOU BUY ?");
+    for drug in DRUGS {
+        println!(
+            "    {}. {drug:<12} ${}",
+            drug as usize + 1,
+            g.prices[drug as usize]
+        );
+    }
+    println!("    0. CANCEL");
+    let drug = match ri("CHOICE") {
+        Some(n) if (1..=6).contains(&n) => DRUGS[(n - 1) as usize],
+        _ => return,
+    };
+    let price = g.prices[drug as usize];
+    let max_buy = (g.cash / price).min(g.free());
+    println!("\n  CAN AFFORD: {}  CAN HOLD: {}", g.cash / price, g.free());
+    if max_buy == 0 {
+        println!("  NOT ENOUGH CASH OR SPACE !");
+        pause();
+        return;
+    }
+    let amt = match ri(&format!(
+        "HOW MUCH {} (max {max_buy})",
+        DRUGS[drug as usize]
+    )) {
+        Some(n) if n > 0 && n <= max_buy => n,
+        Some(0) => return,
+        _ => {
+            println!("  INVALID.");
+            pause();
+            return;
+        }
+    };
+    g.cash -= amt * price;
+    g.coat[drug as usize] += amt;
+    println!(
+        "  BOUGHT {amt} {} FOR ${}.",
+        DRUGS[drug as usize],
+        amt * price
+    );
+    pause();
+}
+
+fn sell(g: &mut G) {
+    cls();
+    hdr("SELL DRUGS");
+    show_prices(g);
+    show_coat(g);
+    if g.total() == 0 {
+        println!("  YOUR TRENCH COAT IS EMPTY !");
+        pause();
+        return;
+    }
+    println!("  WHAT WILL YOU SELL ?");
+    for drug in DRUGS {
+        if g.coat[drug as usize] > 0 {
+            println!(
+                "    {}. {drug:<12} {} units @ ${} each",
+                drug as usize + 1,
+                g.coat[drug as usize],
+                g.prices[drug as usize]
+            );
+        }
+    }
+    println!("    0. CANCEL");
+    let drug = match ri("CHOICE") {
+        Some(n) if (1..=DRUGS.len()).contains(&(n as usize)) => DRUGS[(n - 1) as usize],
+        _ => return,
+    };
+    let have = g.coat[drug as usize];
+    if have == 0 {
+        println!("  YOU DON'T HAVE ANY {drug}.");
+        pause();
+        return;
+    }
+    let amt = match ri(&format!("HOW MANY {drug} (max {have})")) {
+        Some(n) if n > 0 && n <= have => n,
+        Some(0) => return,
+        _ => {
+            println!("  INVALID.");
+            pause();
+            return;
+        }
+    };
+    let earned = amt * g.prices[drug as usize];
+    g.cash += earned;
+    g.coat[drug as usize] -= amt;
+    println!("  SOLD {amt} {} FOR ${earned}.", DRUGS[drug as usize]);
+    pause();
+}
+
+fn jet(g: &mut G, r: &mut Rng) -> bool {
+    // true = dead
+    cls();
+    hdr("JET - WHERE TO, DUDE ?");
+    for loc in LOCATIONS {
+        let here = if loc == g.loc { " <-- HERE" } else { "" };
+        println!("    {}. {loc}{here}", loc as usize + 1);
+    }
+    println!("    0. STAY");
+    println!();
+    let dest = match ri("WHERE TO") {
+        Some(n) if (1..=LOCATIONS.len()).contains(&(n as usize)) => LOCATIONS[(n - 1) as usize],
+        _ => return false,
+    };
+    if dest == g.loc {
+        println!("  YOU'RE ALREADY THERE !");
+        pause();
+        return false;
+    }
+    println!("\n         . . .  S U B W A Y  . . .\n");
+    g.loc = dest;
+    g.day += 1;
+    g.debt = (g.debt as f64 * (1.0 + LOAN_INTEREST)) as i64;
+    g.prices = gen_prices(r);
+    if g.day <= GAME_DAYS {
+        if events(g, r) {
+            return true;
+        }
+        if g.total() >= 5 && r.range(0, 3) == 0 && police(g, r) {
+            return true;
+        }
+    }
+    false
+}
+
+fn loan_shark(g: &mut G) {
+    if g.loc != Location::Bronx {
+        cls();
+        println!("  THE LOAN SHARK ONLY DEALS IN THE BRONX.");
+        pause();
+        return;
+    }
+    loop {
+        cls();
+        hdr("LOAN SHARK");
+        println!("  YOUR DEBT  {}", money(g.debt));
+        println!("  YOUR CASH  {}", money(g.cash));
+        println!();
+        println!("  1. REPAY DEBT\n  2. BORROW MORE\n  3. LEAVE");
+        println!();
+        match ri("CHOICE") {
+            Some(1) => {
+                if g.debt == 0 {
+                    println!("  NO DEBT !");
+                    pause();
+                    continue;
+                }
+                let amt = match ri(&format!("REPAY HOW MUCH (max ${})", g.debt.min(g.cash))) {
+                    Some(n) => n,
+                    None => continue,
+                };
+                if amt <= 0 || amt > g.cash || amt > g.debt {
+                    println!("  INVALID.");
+                    pause();
+                    continue;
+                }
+                g.debt -= amt;
+                g.cash -= amt;
+                println!("  DEBT NOW: ${}", g.debt);
+                pause();
+            }
+            Some(2) => {
+                let amt = match ri(&format!("BORROW HOW MUCH (max ${})", MAX_BORROW)) {
+                    Some(n) => n,
+                    None => continue,
+                };
+                if amt <= 0 || amt > MAX_BORROW {
+                    println!("  YOU THINK HE IS CRAZY MAN !!!");
+                    pause();
+                    continue;
+                }
+                g.debt += amt;
+                g.cash += amt;
+                println!("  BORROWED ${}.  DEBT: ${}", amt, g.debt);
+                pause();
+            }
+            _ => break,
+        }
+    }
+}
+
+fn bank(g: &mut G) {
+    if g.loc != Location::Bronx {
+        cls();
+        println!("  THE BANK IS IN THE BRONX.");
+        pause();
+        return;
+    }
+    loop {
+        cls();
+        hdr("BANK");
+        println!("  ACCOUNT  {}", money(g.bank));
+        println!("  CASH     {}", money(g.cash));
+        println!();
+        println!("  1. DEPOSIT\n  2. WITHDRAW\n  3. LEAVE");
+        println!();
+        match ri("CHOICE") {
+            Some(1) => {
+                let amt = match ri(&format!("DEPOSIT HOW MUCH (max ${})", g.cash)) {
+                    Some(n) => n,
+                    None => continue,
+                };
+                if amt <= 0 || amt > g.cash {
+                    println!("  INVALID.");
+                    pause();
+                    continue;
+                }
+                g.bank += amt;
+                g.cash -= amt;
+                println!("  DEPOSITED {}.  ACCOUNT: {}", money(amt), money(g.bank));
+                pause();
+            }
+            Some(2) => {
+                let amt = match ri(&format!("WITHDRAW HOW MUCH (max {})", money(g.bank))) {
+                    Some(n) => n,
+                    None => continue,
+                };
+                if amt <= 0 || amt > g.bank {
+                    println!("  INVALID.");
+                    pause();
+                    continue;
+                }
+                g.bank -= amt;
+                g.cash += amt;
+                println!("  WITHDREW {}.  ACCOUNT: {}", money(amt), money(g.bank));
+                pause();
+            }
+            _ => break,
+        }
+    }
+}
+
+fn stash_menu(g: &mut G) {
+    if g.loc != Location::Bronx {
+        cls();
+        println!("  YOUR STASH IS IN THE BRONX.");
+        pause();
+        return;
+    }
+    loop {
+        cls();
+        hdr("STASH");
+        show_stash(g);
+        show_coat(g);
+        println!("  1. MOVE TO STASH\n  2. TAKE FROM STASH\n  3. LEAVE");
+        println!();
+        match ri("CHOICE") {
+            Some(1) => {
+                println!("  WHICH DRUG TO STASH ?");
+                for drug in DRUGS {
+                    if g.coat[drug as usize] > 0 {
+                        println!(
+                            "    {}. {drug} ({})",
+                            drug as usize + 1,
+                            g.coat[drug as usize]
+                        );
+                    }
+                }
+                let drug = match ri("DRUG (1-6, 0=cancel)") {
+                    Some(n) if n > 0 && n as usize <= DRUGS.len() => DRUGS[(n - 1) as usize],
+                    _ => continue,
+                };
+                if g.coat[drug as usize] == 0 {
+                    continue;
+                }
+                let amt = match ri(&format!("HOW MANY (max {})", g.coat[drug as usize])) {
+                    Some(n) if n > 0 && n <= g.coat[drug as usize] => n,
+                    _ => continue,
+                };
+                g.coat[drug as usize] -= amt;
+                g.stash[drug as usize] += amt;
+                println!("  MOVED {amt} {drug} TO STASH.");
+                pause();
+            }
+            Some(2) => {
+                println!("  WHICH DRUG TO TAKE ?");
+                for drug in DRUGS {
+                    if g.stash[drug as usize] > 0 {
+                        println!(
+                            "    {}. {drug} ({})",
+                            drug as usize + 1,
+                            g.stash[drug as usize]
+                        );
+                    }
+                }
+                let drug = match ri("DRUG (1-6, 0=cancel)") {
+                    Some(n) if (1..=DRUGS.len()).contains(&(n as usize)) => DRUGS[n as usize - 1],
+                    _ => continue,
+                };
+                if g.stash[drug as usize] == 0 {
+                    continue;
+                }
+                let mxt = g.stash[drug as usize].min(g.free());
+                if mxt == 0 {
+                    println!("  TRENCH COAT FULL !");
+                    pause();
+                    continue;
+                }
+                let amt = match ri(&format!("HOW MANY (max {mxt})")) {
+                    Some(n) if n > 0 && n <= mxt => n,
+                    _ => continue,
+                };
+                g.stash[drug as usize] -= amt;
+                g.coat[drug as usize] += amt;
+                println!("  MOVED {amt} {drug} TO COAT.");
+                pause();
+            }
+            _ => break,
+        }
+    }
+}
+
+// ─── GAME OVER ────────────────────────────────────────────────────────────────
+fn game_over(g: &G, cause: &str) {
+    cls();
+    hdr("GAME OVER");
+    println!("  {}", cause);
+    println!();
+    // Score = (cash + bank - debt) in millions * 2, max 100.
+    // $25M net = score 50.  $50M net = score 100 (perfect).
+    // Stash drugs are abandoned at game end (you can't sell in time) - not counted.
+    let net = g.cash + g.bank - g.debt;
+    let score = if net <= 0 {
+        0
+    } else {
+        ((net as f64 / 1_000_000.0 * 2.0).min(100.0)) as u32
+    };
+    println!("  FINAL TALLY:");
+    div();
+    println!("  CASH   {}", money(g.cash));
+    println!("  BANK   {}", money(g.bank));
+    println!("  DEBT   {}", money(g.debt));
+    println!("  NET    {}", money(net));
+    div();
+    println!();
+    println!("  CONGRATULATIONS !!");
+    println!("  ON A SCALE OF 1 TO 100");
+    println!("  YOUR RATING IS:  {}", score);
+    println!("  (Score = net worth / $1M * 2.  $50M = perfect 100.)");
+    println!();
+    // Ranks tuned to realistic play: $700k is a decent first game (~score 1),
+    // $5M is solid, $25M is expert, $50M is legendary.
+    let rank = match net {
+        n if n >= 50_000_000 => "DRUG LORD    (LEGENDARY - PERFECT SCORE)",
+        n if n >= 25_000_000 => "KINGPIN      (EXPERT)",
+        n if n >= 5_000_000 => "BIG DEALER   (SOLID)",
+        n if n >= 1_000_000 => "DEALER       (DECENT)",
+        n if n >= 250_000 => "SMALL TIMER  (LEARNING THE ROPES)",
+        n if n > 0 => "BAGBOY       (KEEP TRYING)",
+        _ => "BROKE JUNKIE (IN DEBT - GAME OVER MAN)",
+    };
+    println!("  RANK: {}", rank);
+    println!();
+}
+
+// ─── MAIN ────────────────────────────────────────────────────────────────────
+fn play(r: &mut Rng) {
+    let mut g = G::new();
+    g.prices = gen_prices(r);
+    loop {
+        if g.day > GAME_DAYS {
+            game_over(&g, "YOUR MONTH IS UP !");
+            return;
+        }
+        cls();
+        show_status(&g);
+        show_prices(&g);
+        println!("  WHAT DO YOU WANT TO DO ?");
+        println!();
+        println!("    B - BUY DRUGS");
+        println!("    S - SELL DRUGS");
+        println!("    J - JET (TRAVEL)");
+        if g.loc == Location::Bronx {
+            println!("    L - LOAN SHARK");
+            println!("    K - BANK");
+            println!("    T - STASH");
+        }
+        println!("    C - VIEW TRENCH COAT");
+        println!("    Q - QUIT");
+        println!();
+        print!("  > ");
+        let _ = io::stdout().flush();
+        match rl().as_str() {
+            "B" => buy(&mut g),
+            "S" => sell(&mut g),
+            "J" if jet(&mut g, r) => {
+                game_over(&g, "THEY WASTED YOU MAN !!!  WHAT A DRAG !!!");
+                return;
+            }
+            "L" => loan_shark(&mut g),
+            "K" => bank(&mut g),
+            "T" => stash_menu(&mut g),
+            "C" => {
+                cls();
+                hdr("TRENCH COAT");
+                show_coat(&g);
+                pause();
+            }
+            "Q" => {
+                game_over(&g, "YOU QUIT EARLY.");
+                return;
+            }
+            _ => {}
+        }
+    }
+}
+
+fn title(r: &mut Rng) {
+    let _ = r;
+    cls();
+    println!();
+    println!("  ╔═══════════════════════════════════════════════╗");
+    println!("  ║                                               ║");
+    println!("  ║            D R U G   W A R S                  ║");
+    println!("  ║                                               ║");
+    println!("  ║      A GAME BASED ON THE NEW YORK             ║");
+    println!("  ║               DRUG MARKET                     ║");
+    println!("  ║                                               ║");
+    println!("  ║           BY JOHN E. DELL                     ║");
+    println!("  ║            COPYRIGHT (1984)                   ║");
+    println!("  ║                                               ║");
+    println!("  ╚═══════════════════════════════════════════════╝");
+    println!();
+    //The original DOS game needed to seed the PRNG
+    //println!("  PRESS ANY KEY TO BEGIN RANDOMIZING");
+    //rl();
+    //println!("  RANDOMIZING...  PRESS ANY KEY TO STOP");
+    //rl();
+    //println!("  DONE.");
+    println!();
+}
+
+fn instructions() {
+    cls();
+    hdr("INSTRUCTIONS");
+    println!("  This is a game of buying, selling, and fighting.");
+    println!("  The object of the game is to pay off your debt to");
+    println!("  the loan shark.  Then, make as much money as you");
+    println!("  can in a 1 month (30 day) period.  If you deal too");
+    println!("  heavily in drugs, you might run into the police !!");
+    println!();
+    println!("  Your main drug stash will be in the Bronx.");
+    println!("  (It's a nice neighborhood)");
+    println!();
+    println!("  The prices of drugs per unit are:");
+    println!();
+    println!("      COCAINE     15000-30000");
+    println!("      HEROIN       5000-14000");
+    println!("      ACID         1000-4500");
+    println!("      WEED          300-900");
+    println!("      SPEED          70-250");
+    println!("      LUDES          10-60");
+    println!();
+    println!("  The Loan Shark and Bank are only available in the Bronx.");
+    println!("  The Loan Shark charges 10% interest per day - pay him back!");
+    println!();
+    pause();
+}
+
+fn main() {
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos() as u64;
+    let mut r = Rng::new(seed ^ 0xDEAD_BEEF_1984_CAFE);
+    loop {
+        title(&mut r);
+        print!("  DO YOU WANT INSTRUCTIONS ? (Y/N): ");
+        let _ = io::stdout().flush();
+        if rl().starts_with('Y') {
+            instructions();
+        }
+        play(&mut r);
+        println!();
+        print!("  PLAY AGAIN ? (Y/N): ");
+        let _ = io::stdout().flush();
+        if !rl().starts_with('Y') {
+            cls();
+            println!("  THANKS FOR PLAYING !\n");
+            println!("  DRUG WARS  --  COPYRIGHT (1984) JOHN E. DELL");
+            println!("  Rust port for preservation purposes.\n");
+            break;
+        }
+        let ns = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos() as u64;
+        r = Rng::new(ns ^ 0xCAFE_1984);
+    }
+}
