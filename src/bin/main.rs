@@ -4,37 +4,9 @@
 
 use std::fmt;
 use std::io::{self, Write};
+use std::ops::{Index, IndexMut};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-// ─── RNG ─────────────────────────────────────────────────────────────────────
-struct Rng {
-    state: u64,
-}
-impl Rng {
-    fn new(seed: u64) -> Self {
-        Rng { state: seed }
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        self.state = self
-            .state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        self.state
-    }
-
-    fn next_f64(&mut self) -> f64 {
-        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
-    }
-
-    fn range(&mut self, lo: i64, hi: i64) -> i64 {
-        lo + (self.next_f64() * (hi - lo + 1) as f64) as i64
-    }
-
-    fn bool(&mut self) -> bool {
-        self.range(0, 1) == 1
-    }
-}
+use drugwars::Rng;
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 #[derive(Clone, Copy)]
@@ -65,7 +37,7 @@ impl fmt::Display for Drug {
 const DRUGS: [Drug; 6] = [Cocain, Heroin, Acid, Weed, Speed, Ludes];
 use Drug::*;
 
-const DRUG_PRICES: [(i64, i64); 6] = [
+const DRUG_PRICES: [(i64, i64); DRUGS.len()] = [
     (15000, 30000),
     (5000, 14000),
     (1000, 4500),
@@ -125,6 +97,33 @@ const STARTING_DEBT: i64 = 5500;
 const MAX_BORROW: i64 = 5000;
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
+struct DrugCounter([i64; DRUGS.len()]);
+
+impl DrugCounter {
+    fn total(&self) -> i64 {
+        self.0.iter().sum()
+    }
+}
+
+impl Default for DrugCounter {
+    fn default() -> Self {
+        DrugCounter([0; DRUGS.len()])
+    }
+}
+
+impl Index<Drug> for DrugCounter {
+    type Output = i64;
+    fn index(&self, idx: Drug) -> &Self::Output {
+        &self.0[idx as usize]
+    }
+}
+
+impl IndexMut<Drug> for DrugCounter {
+    fn index_mut(&mut self, idx: Drug) -> &mut Self::Output {
+        &mut self.0[idx as usize]
+    }
+}
+
 struct G {
     cash: i64,
     bank: i64,
@@ -132,11 +131,11 @@ struct G {
     day: u32,
     loc: Location,
     coat_size: i64,
-    stash: [i64; 6],
-    coat: [i64; 6],
+    stash: DrugCounter,
+    coat: DrugCounter,
     guns: u32,
     damage: i32,
-    prices: [i64; 6],
+    prices: DrugCounter,
 }
 impl G {
     fn new() -> Self {
@@ -147,18 +146,15 @@ impl G {
             day: 1,
             loc: Location::Ghetto,
             coat_size: 100,
-            stash: [0; 6],
-            coat: [0; 6],
+            stash: DrugCounter::default(),
+            coat: DrugCounter::default(),
             guns: 0,
             damage: 0,
-            prices: [0; 6],
+            prices: DrugCounter::default(),
         }
     }
     fn free(&self) -> i64 {
-        self.coat_size - self.coat.iter().sum::<i64>()
-    }
-    fn total(&self) -> i64 {
-        self.coat.iter().sum()
+        self.coat_size - self.coat.total()
     }
 }
 
@@ -199,13 +195,14 @@ fn hdr(t: &str) {
 }
 
 // ─── PRICES ──────────────────────────────────────────────────────────────────
-fn gen_prices(r: &mut Rng) -> [i64; 6] {
-    std::array::from_fn(|i| {
+fn gen_prices(r: &mut Rng) -> DrugCounter {
+    let prices = std::array::from_fn(|i| {
         //let mut p = [0i64; 6];
         //for i in 0..6 {
         let (lo, hi) = DRUG_PRICES[i];
         r.range(lo, hi)
-    })
+    });
+    DrugCounter(prices)
 }
 
 // ─── DISPLAY ─────────────────────────────────────────────────────────────────
@@ -222,7 +219,7 @@ fn show_status(g: &G) {
     );
     println!(
         "  HOLD  {}/{}  (FREE: {})",
-        g.total(),
+        g.coat.total(),
         g.coat_size,
         g.free()
     );
@@ -232,7 +229,7 @@ fn show_prices(g: &G) {
     println!("  HEY DUDE, THE PRICES OF DRUGS HERE ARE:");
     println!();
     for drug in DRUGS {
-        let price = money(g.prices[drug as usize]);
+        let price = money(g.prices[drug]);
         println!("    {drug:<12} {price:>8}");
     }
     println!();
@@ -258,8 +255,8 @@ fn show_coat(g: &G) {
     println!();
     let mut any = false;
     for drug in DRUGS {
-        if g.coat[drug as usize] > 0 {
-            println!("    {drug:<12} {}", g.coat[drug as usize]);
+        if g.coat[drug] > 0 {
+            println!("    {drug:<12} {}", g.coat[drug]);
             any = true;
         }
     }
@@ -274,8 +271,8 @@ fn show_stash(g: &G) {
     println!();
     let mut any = false;
     for drug in DRUGS {
-        if g.stash[drug as usize] > 0 {
-            println!("    {drug:<12} {}", g.stash[drug as usize]);
+        if g.stash[drug] > 0 {
+            println!("    {drug:<12} {}", g.stash[drug]);
             any = true;
         }
     }
@@ -294,7 +291,7 @@ fn events(g: &mut G, r: &mut Rng) -> bool {
             cls();
             hdr("!! SPECIAL BULLETIN !!");
             println!("  COPS MADE A BIG COKE BUST !!\n  PRICES ARE OUTRAGEOUS !!");
-            g.prices[Drug::Cocain as usize] = r.range(80_000, 140_000);
+            g.prices[Drug::Cocain] = r.range(80_000, 140_000);
             pause();
         }
         2 => {
@@ -303,10 +300,10 @@ fn events(g: &mut G, r: &mut Rng) -> bool {
             println!(
                 "  COLOMBIAN FREIGHTER DUSTED THE COAST GUARD !!\n  WEED PRICES HAVE BOTTOMED OUT !!"
             );
-            g.prices[Drug::Weed as usize] = r.range(40, 100);
+            g.prices[Drug::Weed] = r.range(40, 100);
             pause();
         }
-        3 if g.total() > 0 => {
+        3 if g.coat.total() > 0 => {
             cls();
             hdr("!! BUSTED !!");
             let bl = r.range(2, 6);
@@ -314,19 +311,19 @@ fn events(g: &mut G, r: &mut Rng) -> bool {
             println!("  YOU DROPPED SOME DRUGS !!  THAT'S A DRAG MAN !!");
             let pct = r.range(10, 30);
             for drug in DRUGS {
-                let d = (g.coat[drug as usize] * pct / 100).max(0);
-                g.coat[drug as usize] = (g.coat[drug as usize] - d).max(0);
+                let d = (g.coat[drug] * pct / 100).max(0);
+                g.coat[drug] = (g.coat[drug] - d).max(0);
             }
             pause();
         }
-        4 if g.coat[Drug::Weed as usize] > 0 || g.stash[Drug::Weed as usize] > 0 => {
+        4 if g.coat[Drug::Weed] > 0 || g.stash[Drug::Weed] > 0 => {
             cls();
             hdr("OH NO !!");
             println!("  YOUR MAMA MADE SOME BROWNIES AND USED YOUR WEED !!\n  THEY WERE GREAT !!");
-            if g.coat[Drug::Weed as usize] > 0 {
-                g.coat[Drug::Weed as usize] = 0;
+            if g.coat[Drug::Weed] > 0 {
+                g.coat[Drug::Weed] = 0;
             } else {
-                g.stash[Drug::Weed as usize] = 0;
+                g.stash[Drug::Weed] = 0;
             }
             pause();
         }
@@ -334,7 +331,7 @@ fn events(g: &mut G, r: &mut Rng) -> bool {
             cls();
             hdr("!! SPECIAL BULLETIN !!");
             println!("  PIGS ARE SELLING CHEAP HEROIN FROM LAST WEEK'S RAID !!");
-            g.prices[Drug::Heroin as usize] = r.range(850, 2000);
+            g.prices[Drug::Heroin] = r.range(850, 2000);
             pause();
         }
         6 => {
@@ -342,11 +339,12 @@ fn events(g: &mut G, r: &mut Rng) -> bool {
             if free >= 3 {
                 let amt = r.range(3, 8).min(free);
                 let di = r.range(0, 5) as usize;
+                let drug = DRUGS[di];
                 cls();
                 hdr("LUCKY FIND !!");
-                println!("  YOU FIND {} UNITS OF {}", amt, DRUGS[di]);
+                println!("  YOU FIND {amt} UNITS OF {drug}");
                 println!("  ON A DEAD DUDE IN THE SUBWAY !!");
-                g.coat[di] += amt;
+                g.coat[drug] += amt;
                 pause();
             }
         }
@@ -373,21 +371,21 @@ fn events(g: &mut G, r: &mut Rng) -> bool {
             println!(
                 "  RIVAL DRUG DEALERS RAIDED A PHARMACY AND ARE SELLING  C H E A P   L U D E S  !!!"
             );
-            g.prices[Drug::Ludes as usize] = r.range(2, 8);
+            g.prices[Drug::Ludes] = r.range(2, 8);
             pause();
         }
         9 => {
             cls();
             hdr("!! SPECIAL BULLETIN !!");
             println!("  ADDICTS ARE BUYING HEROIN AT OUTRAGEOUS PRICES !!");
-            g.prices[Drug::Heroin as usize] = r.range(18_000, 43_000);
+            g.prices[Drug::Heroin] = r.range(18_000, 43_000);
             pause();
         }
         10 => {
             cls();
             hdr("!! SPECIAL BULLETIN !!");
             println!("  THE MARKET HAS BEEN FLOODED WITH CHEAP HOME MADE ACID !!!");
-            g.prices[Drug::Acid as usize] = r.range(250, 800);
+            g.prices[Drug::Acid] = r.range(250, 800);
             pause();
         }
         11 => {
@@ -425,7 +423,7 @@ fn events(g: &mut G, r: &mut Rng) -> bool {
             if rl().starts_with('Y') && g.cash >= gp {
                 g.guns += 1;
                 g.cash -= gp;
-                g.coat_size = (g.coat_size - 5).max(g.total());
+                g.coat_size = (g.coat_size - 5).max(g.coat.total());
                 println!("  YOU NOW HAVE {} GUN(S).", g.guns);
                 pause();
             }
@@ -438,24 +436,21 @@ fn events(g: &mut G, r: &mut Rng) -> bool {
 // ─── POLICE ENCOUNTER ────────────────────────────────────────────────────────
 fn police(g: &mut G, r: &mut Rng) -> bool {
     // true = dead/arrested
-    if g.total() < 5 {
+    if g.coat.total() < 5 {
         return false;
     }
     let nd = r.range(1, 4) as u32;
     let mut cops = nd + 1;
     cls();
     hdr("POLICE ENCOUNTER !!");
-    println!(
-        "  OFFICER HARDASS AND {} OF HIS DEPUTIES ARE CHASING YOU !!!!!",
-        nd
-    );
+    println!("  OFFICER HARDASS AND {nd} OF HIS DEPUTIES ARE CHASING YOU !!!!!");
     pause();
 
     loop {
         cls();
         div();
-        println!("  DAMAGE  {} / {}", g.damage, MAX_DAMAGE);
-        println!("  COPS    {}", cops);
+        println!("  DAMAGE  {} / {MAX_DAMAGE}", g.damage);
+        println!("  COPS    {cops}");
         println!("  GUNS    {}", g.guns);
         div();
         println!();
@@ -569,18 +564,14 @@ fn buy(g: &mut G) {
     }
     println!("  WHAT WILL YOU BUY ?");
     for drug in DRUGS {
-        println!(
-            "    {}. {drug:<12} ${}",
-            drug as usize + 1,
-            g.prices[drug as usize]
-        );
+        println!("    {}. {drug:<12} ${}", drug as usize + 1, g.prices[drug]);
     }
     println!("    0. CANCEL");
     let drug = match ri("CHOICE") {
         Some(n) if (1..=6).contains(&n) => DRUGS[(n - 1) as usize],
         _ => return,
     };
-    let price = g.prices[drug as usize];
+    let price = g.prices[drug];
     let max_buy = (g.cash / price).min(g.free());
     println!("\n  CAN AFFORD: {}  CAN HOLD: {}", g.cash / price, g.free());
     if max_buy == 0 {
@@ -588,10 +579,7 @@ fn buy(g: &mut G) {
         pause();
         return;
     }
-    let amt = match ri(&format!(
-        "HOW MUCH {} (max {max_buy})",
-        DRUGS[drug as usize]
-    )) {
+    let amt = match ri(&format!("HOW MUCH {drug} (max {max_buy})")) {
         Some(n) if n > 0 && n <= max_buy => n,
         Some(0) => return,
         _ => {
@@ -601,12 +589,8 @@ fn buy(g: &mut G) {
         }
     };
     g.cash -= amt * price;
-    g.coat[drug as usize] += amt;
-    println!(
-        "  BOUGHT {amt} {} FOR ${}.",
-        DRUGS[drug as usize],
-        amt * price
-    );
+    g.coat[drug] += amt;
+    println!("  BOUGHT {amt} {drug} FOR ${}.", amt * price);
     pause();
 }
 
@@ -615,19 +599,19 @@ fn sell(g: &mut G) {
     hdr("SELL DRUGS");
     show_prices(g);
     show_coat(g);
-    if g.total() == 0 {
+    if g.coat.total() == 0 {
         println!("  YOUR TRENCH COAT IS EMPTY !");
         pause();
         return;
     }
     println!("  WHAT WILL YOU SELL ?");
     for drug in DRUGS {
-        if g.coat[drug as usize] > 0 {
+        if g.coat[drug] > 0 {
             println!(
                 "    {}. {drug:<12} {} units @ ${} each",
                 drug as usize + 1,
-                g.coat[drug as usize],
-                g.prices[drug as usize]
+                g.coat[drug],
+                g.prices[drug]
             );
         }
     }
@@ -636,7 +620,7 @@ fn sell(g: &mut G) {
         Some(n) if (1..=DRUGS.len()).contains(&(n as usize)) => DRUGS[(n - 1) as usize],
         _ => return,
     };
-    let have = g.coat[drug as usize];
+    let have = g.coat[drug];
     if have == 0 {
         println!("  YOU DON'T HAVE ANY {drug}.");
         pause();
@@ -651,10 +635,10 @@ fn sell(g: &mut G) {
             return;
         }
     };
-    let earned = amt * g.prices[drug as usize];
+    let earned = amt * g.prices[drug];
     g.cash += earned;
-    g.coat[drug as usize] -= amt;
-    println!("  SOLD {amt} {} FOR ${earned}.", DRUGS[drug as usize]);
+    g.coat[drug] -= amt;
+    println!("  SOLD {amt} {drug} FOR ${earned}.");
     pause();
 }
 
@@ -686,7 +670,7 @@ fn jet(g: &mut G, r: &mut Rng) -> bool {
         if events(g, r) {
             return true;
         }
-        if g.total() >= 5 && r.range(0, 3) == 0 && police(g, r) {
+        if g.coat.total() >= 5 && r.range(0, 3) == 0 && police(g, r) {
             return true;
         }
     }
@@ -818,49 +802,41 @@ fn stash_menu(g: &mut G) {
             Some(1) => {
                 println!("  WHICH DRUG TO STASH ?");
                 for drug in DRUGS {
-                    if g.coat[drug as usize] > 0 {
-                        println!(
-                            "    {}. {drug} ({})",
-                            drug as usize + 1,
-                            g.coat[drug as usize]
-                        );
+                    if g.coat[drug] > 0 {
+                        println!("    {}. {drug} ({})", drug as usize + 1, g.coat[drug]);
                     }
                 }
                 let drug = match ri("DRUG (1-6, 0=cancel)") {
                     Some(n) if n > 0 && n as usize <= DRUGS.len() => DRUGS[(n - 1) as usize],
                     _ => continue,
                 };
-                if g.coat[drug as usize] == 0 {
+                if g.coat[drug] == 0 {
                     continue;
                 }
-                let amt = match ri(&format!("HOW MANY (max {})", g.coat[drug as usize])) {
-                    Some(n) if n > 0 && n <= g.coat[drug as usize] => n,
+                let amt = match ri(&format!("HOW MANY (max {})", g.coat[drug])) {
+                    Some(n) if n > 0 && n <= g.coat[drug] => n,
                     _ => continue,
                 };
-                g.coat[drug as usize] -= amt;
-                g.stash[drug as usize] += amt;
+                g.coat[drug] -= amt;
+                g.stash[drug] += amt;
                 println!("  MOVED {amt} {drug} TO STASH.");
                 pause();
             }
             Some(2) => {
                 println!("  WHICH DRUG TO TAKE ?");
                 for drug in DRUGS {
-                    if g.stash[drug as usize] > 0 {
-                        println!(
-                            "    {}. {drug} ({})",
-                            drug as usize + 1,
-                            g.stash[drug as usize]
-                        );
+                    if g.stash[drug] > 0 {
+                        println!("    {}. {drug} ({})", drug as usize + 1, g.stash[drug]);
                     }
                 }
                 let drug = match ri("DRUG (1-6, 0=cancel)") {
                     Some(n) if (1..=DRUGS.len()).contains(&(n as usize)) => DRUGS[n as usize - 1],
                     _ => continue,
                 };
-                if g.stash[drug as usize] == 0 {
+                if g.stash[drug] == 0 {
                     continue;
                 }
-                let mxt = g.stash[drug as usize].min(g.free());
+                let mxt = g.stash[drug].min(g.free());
                 if mxt == 0 {
                     println!("  TRENCH COAT FULL !");
                     pause();
@@ -870,8 +846,8 @@ fn stash_menu(g: &mut G) {
                     Some(n) if n > 0 && n <= mxt => n,
                     _ => continue,
                 };
-                g.stash[drug as usize] -= amt;
-                g.coat[drug as usize] += amt;
+                g.stash[drug] -= amt;
+                g.coat[drug] += amt;
                 println!("  MOVED {amt} {drug} TO COAT.");
                 pause();
             }
@@ -948,6 +924,7 @@ fn play(r: &mut Rng) {
         println!("    C - VIEW TRENCH COAT");
         println!("    Q - QUIT");
         println!();
+
         print!("  > ");
         let _ = io::stdout().flush();
         match rl().as_str() {
@@ -1024,6 +1001,7 @@ fn instructions() {
     println!("  The Loan Shark and Bank are only available in the Bronx.");
     println!("  The Loan Shark charges 10% interest per day - pay him back!");
     println!();
+
     pause();
 }
 
@@ -1033,6 +1011,7 @@ fn main() {
         .unwrap_or_default()
         .subsec_nanos() as u64;
     let mut r = Rng::new(seed ^ 0xDEAD_BEEF_1984_CAFE);
+
     loop {
         title(&mut r);
         print!("  DO YOU WANT INSTRUCTIONS ? (Y/N): ");
