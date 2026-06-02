@@ -2,11 +2,11 @@
 // Reconstructed from the DOS executable strings and TI-BASIC port logic.
 // Copyright (1984) John E. Dell. This recreation is for preservation purposes.
 
+use drugwars::Rng;
 use std::fmt;
 use std::io::{self, Write};
 use std::ops::{Index, IndexMut};
 use std::time::{SystemTime, UNIX_EPOCH};
-use drugwars::Rng;
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 #[derive(Clone, Copy)]
@@ -211,11 +211,10 @@ fn show_status(g: &G) {
     div();
     println!("  CASH  {:<14} BANK  {}", money(g.cash), money(g.bank));
     println!(
-        "  DEBT  {:<14} GUNS  {}   DAMAGE {}/{}",
+        "  DEBT  {:<14} GUNS  {}   DAMAGE {}/{MAX_DAMAGE}",
         money(g.debt),
         g.guns,
-        g.damage,
-        MAX_DAMAGE
+        g.damage
     );
     println!(
         "  HOLD  {}/{}  (FREE: {})",
@@ -247,7 +246,7 @@ fn money(n: i64) -> String {
         out.push(ch);
     }
 
-    format!("{}${}", sign, out.chars().rev().collect::<String>())
+    format!("{sign}${}", out.chars().rev().collect::<String>())
 }
 
 fn show_coat(g: &G) {
@@ -307,7 +306,7 @@ fn events(g: &mut G, r: &mut Rng) -> bool {
             cls();
             hdr("!! BUSTED !!");
             let bl = r.range(2, 6);
-            println!("  POLICE DOGS CHASE YOU FOR {} BLOCKS !!", bl);
+            println!("  POLICE DOGS CHASE YOU FOR {bl} BLOCKS !!");
             println!("  YOU DROPPED SOME DRUGS !!  THAT'S A DRAG MAN !!");
             let pct = r.range(10, 30);
             for drug in DRUGS {
@@ -417,7 +416,7 @@ fn events(g: &mut G, r: &mut Rng) -> bool {
             let (gn, gp) = GUNS[gi];
             cls();
             hdr("OPPORTUNITY !!");
-            println!("  WILL YOU BUY A {} FOR ${} ?", gn, gp);
+            println!("  WILL YOU BUY A {gn} FOR ${gp} ?");
             print!("  (Y/N): ");
             let _ = io::stdout().flush();
             if rl().starts_with('Y') && g.cash >= gp {
@@ -489,7 +488,10 @@ fn police(g: &mut G, r: &mut Rng) -> bool {
                     g.cash += bounty;
                     cls();
                     println!("  YOU KILLED ALL OF THEM !!!!");
-                    println!("\n  YOU FOUND ${} ON OFFICER HARDASS' CARCAS !!!", bounty);
+                    println!(
+                        "\n  YOU FOUND {} ON OFFICER HARDASS' CARCAS !!!",
+                        money(bounty)
+                    );
                     pause();
                     offer_doctor(g);
                     return false;
@@ -513,8 +515,8 @@ fn offer_doctor(g: &mut G) {
     if g.damage > 0 && g.cash >= DOCTOR_COST {
         cls();
         print!(
-            "  WILL YOU PAY ${} TO HAVE A DOCTOR SEW YOU UP ? (Y/N): ",
-            DOCTOR_COST
+            "  WILL YOU PAY {} TO HAVE A DOCTOR SEW YOU UP ? (Y/N): ",
+            money(DOCTOR_COST)
         );
         let _ = io::stdout().flush();
         if rl().starts_with('Y') {
@@ -526,16 +528,12 @@ fn offer_doctor(g: &mut G) {
     }
 }
 
+// return true if dead
 fn cops_shoot(g: &mut G, r: &mut Rng, cops: u32) -> bool {
     cls();
     println!("  THEY ARE FIRING ON YOU MAN !!");
-    let mut hit = false;
-    for _ in 0..cops {
-        if r.bool() {
-            hit = true;
-            break;
-        }
-    }
+    let hit = (0..cops).any(|_| r.bool());
+
     if hit {
         println!("  YOU'VE BEEN HIT !!");
         g.damage += 1;
