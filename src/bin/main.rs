@@ -124,7 +124,7 @@ impl IndexMut<Drug> for DrugCounter {
     }
 }
 
-struct G {
+struct Game {
     cash: i64,
     bank: i64,
     debt: i64,
@@ -137,9 +137,9 @@ struct G {
     damage: i32,
     prices: DrugCounter,
 }
-impl G {
+impl Game {
     fn new() -> Self {
-        G {
+        Game {
             cash: STARTING_CASH,
             bank: 0,
             debt: STARTING_DEBT,
@@ -153,8 +153,31 @@ impl G {
             prices: DrugCounter::default(),
         }
     }
-    fn free(&self) -> i64 {
+    fn coat_free(&self) -> i64 {
         self.coat_size - self.coat.total()
+    }
+
+    pub fn net_worth(&self) -> i64 {
+        // Stash drugs are abandoned at game end (you can't sell in time) - not counted.
+        self.cash + self.bank - self.debt
+    }
+
+    pub fn score(&self) -> u32 {
+        let net = self.net_worth();
+        if net <= 0 { 0 }
+        else { ((net as f64 / 1_000_000.0 * 2.0).min(100.0)) as u32 }
+    }
+
+    pub fn rank(&self) -> &'static str {
+        match self.net_worth() {
+            n if n >= 50_000_000 => "DRUG LORD",
+            n if n >= 25_000_000 => "KINGPIN",
+            n if n >=  5_000_000 => "BIG DEALER",
+            n if n >=  1_000_000 => "DEALER",
+            n if n >=    250_000 => "SMALL TIMER",
+            n if n >           0 => "BAGBOY",
+            _                    => "BROKE JUNKIE",
+        }
     }
 }
 
@@ -206,7 +229,7 @@ fn gen_prices(r: &mut Rng) -> DrugCounter {
 }
 
 // ─── DISPLAY ─────────────────────────────────────────────────────────────────
-fn show_status(g: &G) {
+fn show_status(g: &Game) {
     println!("  DAY {} / {}    LOCATION: {}", g.day, GAME_DAYS, g.loc);
     div();
     println!("  CASH  {:<14} BANK  {}", money(g.cash), money(g.bank));
@@ -220,11 +243,11 @@ fn show_status(g: &G) {
         "  HOLD  {}/{}  (FREE: {})",
         g.coat.total(),
         g.coat_size,
-        g.free()
+        g.coat_free()
     );
     div();
 }
-fn show_prices(g: &G) {
+fn show_prices(g: &Game) {
     println!("  HEY DUDE, THE PRICES OF DRUGS HERE ARE:");
     println!();
     for drug in DRUGS {
@@ -249,7 +272,7 @@ fn money(n: i64) -> String {
     format!("{sign}${}", out.chars().rev().collect::<String>())
 }
 
-fn show_coat(g: &G) {
+fn show_coat(g: &Game) {
     println!("  TRENCH COAT:");
     println!();
     let mut any = false;
@@ -262,10 +285,10 @@ fn show_coat(g: &G) {
     if !any {
         println!("    (empty)");
     }
-    println!("    {:<12} {}", "FREE SPACE", g.free());
+    println!("    {:<12} {}", "FREE SPACE", g.coat_free());
     println!();
 }
-fn show_stash(g: &G) {
+fn show_stash(g: &Game) {
     println!("  STASH (BRONX):");
     println!();
     let mut any = false;
@@ -282,7 +305,7 @@ fn show_stash(g: &G) {
 }
 
 // ─── RANDOM EVENTS ───────────────────────────────────────────────────────────
-fn events(g: &mut G, r: &mut Rng) -> bool {
+fn events(g: &mut Game, r: &mut Rng) -> bool {
     // returns true = dead
     let d = r.range(0, 20);
     match d {
@@ -334,10 +357,10 @@ fn events(g: &mut G, r: &mut Rng) -> bool {
             pause();
         }
         6 => {
-            let free = g.free();
+            let free = g.coat_free();
             if free >= 3 {
                 let amt = r.range(3, 8).min(free);
-                let di = r.range(0, 5) as usize;
+                let di = r.range(0, (DRUGS.len()-1) as i64) as usize;
                 let drug = DRUGS[di];
                 cls();
                 hdr("LUCKY FIND !!");
@@ -433,7 +456,7 @@ fn events(g: &mut G, r: &mut Rng) -> bool {
 }
 
 // ─── POLICE ENCOUNTER ────────────────────────────────────────────────────────
-fn police(g: &mut G, r: &mut Rng) -> bool {
+fn police(g: &mut Game, r: &mut Rng) -> bool {
     // true = dead/arrested
     if g.coat.total() < 5 {
         return false;
@@ -511,7 +534,7 @@ fn police(g: &mut G, r: &mut Rng) -> bool {
     }
 }
 
-fn offer_doctor(g: &mut G) {
+fn offer_doctor(g: &mut Game) {
     if g.damage > 0 && g.cash >= DOCTOR_COST {
         cls();
         print!(
@@ -529,7 +552,7 @@ fn offer_doctor(g: &mut G) {
 }
 
 // return true if dead
-fn cops_shoot(g: &mut G, r: &mut Rng, cops: u32) -> bool {
+fn cops_shoot(g: &mut Game, r: &mut Rng, cops: u32) -> bool {
     cls();
     println!("  THEY ARE FIRING ON YOU MAN !!");
     let hit = (0..cops).any(|_| r.bool());
@@ -550,12 +573,12 @@ fn cops_shoot(g: &mut G, r: &mut Rng, cops: u32) -> bool {
 }
 
 // ─── ACTIONS ─────────────────────────────────────────────────────────────────
-fn buy(g: &mut G) {
+fn buy(g: &mut Game) {
     cls();
     hdr("BUY DRUGS");
     show_prices(g);
     show_coat(g);
-    if g.free() == 0 {
+    if g.coat_free() == 0 {
         println!("  YOUR TRENCH COAT IS FULL !");
         pause();
         return;
@@ -570,8 +593,8 @@ fn buy(g: &mut G) {
         _ => return,
     };
     let price = g.prices[drug];
-    let max_buy = (g.cash / price).min(g.free());
-    println!("\n  CAN AFFORD: {}  CAN HOLD: {}", g.cash / price, g.free());
+    let max_buy = (g.cash / price).min(g.coat_free());
+    println!("\n  CAN AFFORD: {}  CAN HOLD: {}", g.cash / price, g.coat_free());
     if max_buy == 0 {
         println!("  NOT ENOUGH CASH OR SPACE !");
         pause();
@@ -592,7 +615,7 @@ fn buy(g: &mut G) {
     pause();
 }
 
-fn sell(g: &mut G) {
+fn sell(g: &mut Game) {
     cls();
     hdr("SELL DRUGS");
     show_prices(g);
@@ -640,7 +663,7 @@ fn sell(g: &mut G) {
     pause();
 }
 
-fn jet(g: &mut G, r: &mut Rng) -> bool {
+fn jet(g: &mut Game, r: &mut Rng) -> bool {
     // true = dead
     cls();
     hdr("JET - WHERE TO, DUDE ?");
@@ -675,7 +698,7 @@ fn jet(g: &mut G, r: &mut Rng) -> bool {
     false
 }
 
-fn loan_shark(g: &mut G) {
+fn loan_shark(g: &mut Game) {
     if g.loc != Location::Bronx {
         cls();
         println!("  THE LOAN SHARK ONLY DEALS IN THE BRONX.");
@@ -731,7 +754,7 @@ fn loan_shark(g: &mut G) {
     }
 }
 
-fn bank(g: &mut G) {
+fn bank(g: &mut Game) {
     if g.loc != Location::Bronx {
         cls();
         println!("  THE BANK IS IN THE BRONX.");
@@ -782,7 +805,7 @@ fn bank(g: &mut G) {
     }
 }
 
-fn stash_menu(g: &mut G) {
+fn stash_menu(g: &mut Game) {
     if g.loc != Location::Bronx {
         cls();
         println!("  YOUR STASH IS IN THE BRONX.");
@@ -834,7 +857,7 @@ fn stash_menu(g: &mut G) {
                 if g.stash[drug] == 0 {
                     continue;
                 }
-                let mxt = g.stash[drug].min(g.free());
+                let mxt = g.stash[drug].min(g.coat_free());
                 if mxt == 0 {
                     println!("  TRENCH COAT FULL !");
                     pause();
@@ -855,51 +878,32 @@ fn stash_menu(g: &mut G) {
 }
 
 // ─── GAME OVER ────────────────────────────────────────────────────────────────
-fn game_over(g: &G, cause: &str) {
+fn game_over(g: &Game, cause: &str) {
     cls();
     hdr("GAME OVER");
-    println!("  {}", cause);
+    println!("  {cause}");
     println!();
-    // Score = (cash + bank - debt) in millions * 2, max 100.
-    // $25M net = score 50.  $50M net = score 100 (perfect).
-    // Stash drugs are abandoned at game end (you can't sell in time) - not counted.
-    let net = g.cash + g.bank - g.debt;
-    let score = if net <= 0 {
-        0
-    } else {
-        ((net as f64 / 1_000_000.0 * 2.0).min(100.0)) as u32
-    };
+
     println!("  FINAL TALLY:");
     div();
     println!("  CASH   {}", money(g.cash));
     println!("  BANK   {}", money(g.bank));
     println!("  DEBT   {}", money(g.debt));
-    println!("  NET    {}", money(net));
+    println!("  NET    {}", money(g.net_worth()));
     div();
     println!();
     println!("  CONGRATULATIONS !!");
     println!("  ON A SCALE OF 1 TO 100");
-    println!("  YOUR RATING IS:  {}", score);
-    println!("  (Score = net worth / $1M * 2.  $50M = perfect 100.)");
+    println!("  YOUR RATING IS:  {}", g.score());
     println!();
-    // Ranks tuned to realistic play: $700k is a decent first game (~score 1),
-    // $5M is solid, $25M is expert, $50M is legendary.
-    let rank = match net {
-        n if n >= 50_000_000 => "DRUG LORD    (LEGENDARY - PERFECT SCORE)",
-        n if n >= 25_000_000 => "KINGPIN      (EXPERT)",
-        n if n >= 5_000_000 => "BIG DEALER   (SOLID)",
-        n if n >= 1_000_000 => "DEALER       (DECENT)",
-        n if n >= 250_000 => "SMALL TIMER  (LEARNING THE ROPES)",
-        n if n > 0 => "BAGBOY       (KEEP TRYING)",
-        _ => "BROKE JUNKIE (IN DEBT - GAME OVER MAN)",
-    };
-    println!("  RANK: {}", rank);
+
+    println!("  RANK: {}", g.rank());
     println!();
 }
 
 // ─── MAIN ────────────────────────────────────────────────────────────────────
 fn play(r: &mut Rng) {
-    let mut g = G::new();
+    let mut g = Game::new();
     g.prices = gen_prices(r);
     loop {
         if g.day > GAME_DAYS {
@@ -966,7 +970,7 @@ fn title(r: &mut Rng) {
     println!("  ║                                               ║");
     println!("  ╚═══════════════════════════════════════════════╝");
     println!();
-    //The original DOS game needed to seed the PRNG
+    //The original DOS game needed this to seed the PRNG
     //println!("  PRESS ANY KEY TO BEGIN RANDOMIZING");
     //rl();
     //println!("  RANDOMIZING...  PRESS ANY KEY TO STOP");
