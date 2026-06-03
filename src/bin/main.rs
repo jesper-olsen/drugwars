@@ -158,25 +158,28 @@ impl Game {
     }
 
     pub fn net_worth(&self) -> i64 {
-        // Stash drugs are abandoned at game end (you can't sell in time) - not counted.
+        // Stash drugs are abandoned at game end - not counted.
         self.cash + self.bank - self.debt
     }
 
     pub fn score(&self) -> u32 {
         let net = self.net_worth();
-        if net <= 0 { 0 }
-        else { ((net as f64 / 1_000_000.0 * 2.0).min(100.0)) as u32 }
+        if net <= 0 {
+            0
+        } else {
+            ((net as f64 / 1_000_000.0 * 2.0).min(100.0)) as u32
+        }
     }
 
     pub fn rank(&self) -> &'static str {
         match self.net_worth() {
             n if n >= 50_000_000 => "DRUG LORD",
             n if n >= 25_000_000 => "KINGPIN",
-            n if n >=  5_000_000 => "BIG DEALER",
-            n if n >=  1_000_000 => "DEALER",
-            n if n >=    250_000 => "SMALL TIMER",
-            n if n >           0 => "BAGBOY",
-            _                    => "BROKE JUNKIE",
+            n if n >= 5_000_000 => "BIG DEALER",
+            n if n >= 1_000_000 => "DEALER",
+            n if n >= 250_000 => "SMALL TIMER",
+            n if n > 0 => "BAGBOY",
+            _ => "BROKE JUNKIE",
         }
     }
 }
@@ -360,7 +363,7 @@ fn events(g: &mut Game, r: &mut Rng) -> bool {
             let free = g.coat_free();
             if free >= 3 {
                 let amt = r.range(3, 8).min(free);
-                let di = r.range(0, (DRUGS.len()-1) as i64) as usize;
+                let di = r.range(0, (DRUGS.len() - 1) as i64) as usize;
                 let drug = DRUGS[di];
                 cls();
                 hdr("LUCKY FIND !!");
@@ -573,6 +576,7 @@ fn cops_shoot(g: &mut Game, r: &mut Rng, cops: u32) -> bool {
 }
 
 // ─── ACTIONS ─────────────────────────────────────────────────────────────────
+
 fn buy(g: &mut Game) {
     cls();
     hdr("BUY DRUGS");
@@ -585,16 +589,21 @@ fn buy(g: &mut Game) {
     }
     println!("  WHAT WILL YOU BUY ?");
     for drug in DRUGS {
-        println!("    {}. {drug:<12} ${}", drug as usize + 1, g.prices[drug]);
+        let price = money(g.prices[drug]);
+        println!("    {}. {drug:<12} {price:>8}", drug as usize + 1);
     }
     println!("    0. CANCEL");
     let drug = match ri("CHOICE") {
-        Some(n) if (1..=6).contains(&n) => DRUGS[(n - 1) as usize],
+        Some(n) if (1..=DRUGS.len()).contains(&n.try_into().unwrap()) => DRUGS[(n - 1) as usize],
         _ => return,
     };
     let price = g.prices[drug];
     let max_buy = (g.cash / price).min(g.coat_free());
-    println!("\n  CAN AFFORD: {}  CAN HOLD: {}", g.cash / price, g.coat_free());
+    println!(
+        "\n  CAN AFFORD: {}  CAN HOLD: {}",
+        g.cash / price,
+        g.coat_free()
+    );
     if max_buy == 0 {
         println!("  NOT ENOUGH CASH OR SPACE !");
         pause();
