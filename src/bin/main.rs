@@ -99,14 +99,6 @@ const MAX_BORROW: i64 = 5000;
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
 
-pub enum TravelEvent {
-    ArrivedSafely,
-    PriceSpike(Drug, i64),
-    Busted { dropped: i64 },
-    PoliceChase { cops: u32 },
-    Dead(&'static str),
-}
-
 struct DrugCounter([i64; DRUGS.len()]);
 
 impl DrugCounter {
@@ -357,6 +349,7 @@ fn events(g: &mut Game, r: &mut Rng) -> bool {
     // returns true = dead
     let d = r.range(0, 20);
     match d {
+        // 6 blanks out of 21
         1 => {
             cls();
             hdr("!! SPECIAL BULLETIN !!");
@@ -373,20 +366,58 @@ fn events(g: &mut Game, r: &mut Rng) -> bool {
             g.prices[Drug::Weed] = r.range(40, 100);
             pause();
         }
-        3 if g.coat.total() > 0 => {
+        3 => {
+            cls();
+            hdr("!! SPECIAL BULLETIN !!");
+            println!("  PIGS ARE SELLING CHEAP HEROIN FROM LAST WEEK'S RAID !!");
+            g.prices[Drug::Heroin] = r.range(850, 2000);
+            pause();
+        }
+        4 => {
+            cls();
+            hdr("!! SPECIAL BULLETIN !!");
+            println!(
+                "  RIVAL DRUG DEALERS RAIDED A PHARMACY AND ARE SELLING  C H E A P   L U D E S  !!!"
+            );
+            g.prices[Drug::Ludes] = r.range(2, 8);
+            pause();
+        }
+        5 => {
+            cls();
+            hdr("!! SPECIAL BULLETIN !!");
+            println!("  ADDICTS ARE BUYING HEROIN AT OUTRAGEOUS PRICES !!");
+            g.prices[Drug::Heroin] = r.range(18_000, 43_000);
+            pause();
+        }
+        6 => {
+            cls();
+            hdr("!! SPECIAL BULLETIN !!");
+            println!("  THE MARKET HAS BEEN FLOODED WITH CHEAP HOME MADE ACID !!!");
+            g.prices[Drug::Acid] = r.range(250, 800);
+            pause();
+        }
+        7 if g.coat.total() > 0 => {
             cls();
             hdr("!! BUSTED !!");
             let bl = r.range(2, 6);
             println!("  POLICE DOGS CHASE YOU FOR {bl} BLOCKS !!");
-            println!("  YOU DROPPED SOME DRUGS !!  THAT'S A DRAG MAN !!");
             let pct = r.range(10, 30);
+            let mut dropped = false;
             for drug in DRUGS {
-                let d = (g.coat[drug] * pct / 100).max(0);
-                g.coat[drug] = (g.coat[drug] - d).max(0);
+                if g.coat[drug]>0 {
+                    let d = g.coat[drug] * pct / 100;
+                    g.coat[drug] = (g.coat[drug] - d).max(0);
+                    if d>0 {
+                        dropped = true
+                    }
+                }
+            }
+            if dropped {
+                println!("  YOU DROPPED SOME DRUGS !!  THAT'S A DRAG MAN !!");
             }
             pause();
         }
-        4 if g.coat[Drug::Weed] > 0 || g.stash[Drug::Weed] > 0 => {
+        8 if g.coat[Drug::Weed] > 0 || g.stash[Drug::Weed] > 0 => {
             cls();
             hdr("OH NO !!");
             println!("  YOUR MAMA MADE SOME BROWNIES AND USED YOUR WEED !!\n  THEY WERE GREAT !!");
@@ -397,14 +428,18 @@ fn events(g: &mut Game, r: &mut Rng) -> bool {
             }
             pause();
         }
-        5 => {
+        9 => {
             cls();
-            hdr("!! SPECIAL BULLETIN !!");
-            println!("  PIGS ARE SELLING CHEAP HEROIN FROM LAST WEEK'S RAID !!");
-            g.prices[Drug::Heroin] = r.range(850, 2000);
+            hdr("OH NO !!");
+            let lost = g.cash / 3;
+            g.cash -= lost;
+            println!(
+                "  YOU WERE MUGGED IN THE SUBWAY !!\n  YOU LOST ${} !!",
+                lost
+            );
             pause();
         }
-        6 => {
+        10 => {
             let free = g.coat_free();
             if free >= 3 {
                 let amt = r.range(3, 8).min(free);
@@ -418,7 +453,7 @@ fn events(g: &mut Game, r: &mut Rng) -> bool {
                 pause();
             }
         }
-        7 => {
+        11 => {
             cls();
             hdr("DANGER !!");
             println!("  THERE IS SOME WEED THAT SMELLS LIKE PARAQUAT HERE !!");
@@ -434,40 +469,6 @@ fn events(g: &mut Game, r: &mut Rng) -> bool {
                 pause();
                 return true;
             }
-        }
-        8 => {
-            cls();
-            hdr("!! SPECIAL BULLETIN !!");
-            println!(
-                "  RIVAL DRUG DEALERS RAIDED A PHARMACY AND ARE SELLING  C H E A P   L U D E S  !!!"
-            );
-            g.prices[Drug::Ludes] = r.range(2, 8);
-            pause();
-        }
-        9 => {
-            cls();
-            hdr("!! SPECIAL BULLETIN !!");
-            println!("  ADDICTS ARE BUYING HEROIN AT OUTRAGEOUS PRICES !!");
-            g.prices[Drug::Heroin] = r.range(18_000, 43_000);
-            pause();
-        }
-        10 => {
-            cls();
-            hdr("!! SPECIAL BULLETIN !!");
-            println!("  THE MARKET HAS BEEN FLOODED WITH CHEAP HOME MADE ACID !!!");
-            g.prices[Drug::Acid] = r.range(250, 800);
-            pause();
-        }
-        11 => {
-            cls();
-            hdr("OH NO !!");
-            let lost = g.cash / 3;
-            g.cash -= lost;
-            println!(
-                "  YOU WERE MUGGED IN THE SUBWAY !!\n  YOU LOST ${} !!",
-                lost
-            );
-            pause();
         }
         12 | 13 if g.cash >= TRENCH_UPGRADE_COST => {
             cls();
@@ -949,6 +950,7 @@ fn play(r: &mut Rng) {
             println!("    T - STASH");
         }
         println!("    C - VIEW TRENCH COAT");
+        println!("    I - INSTRUCTIONS");
         println!("    Q - QUIT");
         println!();
 
@@ -970,6 +972,7 @@ fn play(r: &mut Rng) {
                 show_coat(&g);
                 pause();
             }
+            "I" => instructions(),
             "Q" => {
                 game_over(&g, "YOU QUIT EARLY.");
                 return;
