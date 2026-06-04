@@ -4,11 +4,10 @@ A Rust implementation of the classic 1984 trading game Drug Wars.
 
 Buy low, sell high, avoid the police, repay the loan shark, and try to build a fortune in 30 days.
 
-![PNG of the drugwars terminal app](drugwars.png)
 
 ## Prerequisites 
 
-Install [rust](https://rust-lang.org/tools/install/)
+Install [Rust](https://rust-lang.org/tools/install/)
 
 ## Running
 

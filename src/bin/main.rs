@@ -5,6 +5,7 @@
 use drugwars::Rng;
 use std::fmt;
 use std::io::{self, Write};
+use std::ops::RangeInclusive;
 use std::ops::{Index, IndexMut};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -97,6 +98,15 @@ const STARTING_DEBT: i64 = 5500;
 const MAX_BORROW: i64 = 5000;
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
+
+pub enum TravelEvent {
+    ArrivedSafely,
+    PriceSpike(Drug, i64),
+    Busted { dropped: i64 },
+    PoliceChase { cops: u32 },
+    Dead(&'static str),
+}
+
 struct DrugCounter([i64; DRUGS.len()]);
 
 impl DrugCounter {
@@ -137,6 +147,7 @@ struct Game {
     damage: i32,
     prices: DrugCounter,
 }
+
 impl Game {
     fn new() -> Self {
         Game {
@@ -182,6 +193,38 @@ impl Game {
             _ => "BROKE JUNKIE",
         }
     }
+
+    fn gen_prices(&mut self, r: &mut Rng) {
+        for (i, &(lo, hi)) in DRUG_PRICES.iter().enumerate() {
+            self.prices.0[i] = r.range(lo, hi);
+        }
+    }
+
+    pub fn buy_drug(&mut self, drug: Drug, amount: i64) -> Result<i64, &'static str> {
+        let price = self.prices[drug];
+        if self.coat_free() < amount {
+            return Err("Not enough space in trench coat.");
+        }
+        if self.cash < amount * price {
+            return Err("Not enough cash.");
+        }
+
+        let cost = amount * price;
+        self.cash -= cost;
+        self.coat[drug] += amount;
+        Ok(cost)
+    }
+
+    pub fn sell_drug(&mut self, drug: Drug, amount: i64) -> Result<i64, &'static str> {
+        if self.coat[drug]<amount {
+            return Err("Not enough drug in trench coat.");
+        }
+
+        let earned = amount * self.prices[drug];
+        self.cash += earned;
+        self.coat[drug] -= amount;
+        Ok(earned)
+    }
 }
 
 // ─── I/O ─────────────────────────────────────────────────────────────────────
@@ -202,10 +245,23 @@ fn rl() -> String {
     s.trim().to_uppercase()
 }
 
-fn ri(prompt: &str) -> Option<i64> {
-    print!("  {}: ", prompt);
-    let _ = io::stdout().flush();
-    rl().parse().ok()
+fn read_int<T>(prompt: &str, range: RangeInclusive<T>) -> T
+where
+    T: std::str::FromStr,
+    T: PartialOrd,
+{
+    loop {
+        print!("  {prompt}: ");
+        let _ = io::stdout().flush();
+
+        if let Ok(n) = rl().parse::<T>()
+            && range.contains(&n)
+        {
+            return n;
+        }
+
+        println!("  INVALID.");
+    }
 }
 
 fn div() {
@@ -218,17 +274,6 @@ fn hdr(t: &str) {
     println!("  ║  {:40}║", t);
     println!("  ╚══════════════════════════════════════════╝");
     println!();
-}
-
-// ─── PRICES ──────────────────────────────────────────────────────────────────
-fn gen_prices(r: &mut Rng) -> DrugCounter {
-    let prices = std::array::from_fn(|i| {
-        //let mut p = [0i64; 6];
-        //for i in 0..6 {
-        let (lo, hi) = DRUG_PRICES[i];
-        r.range(lo, hi)
-    });
-    DrugCounter(prices)
 }
 
 // ─── DISPLAY ─────────────────────────────────────────────────────────────────
@@ -593,10 +638,11 @@ fn buy(g: &mut Game) {
         println!("    {}. {drug:<12} {price:>8}", drug as usize + 1);
     }
     println!("    0. CANCEL");
-    let drug = match ri("CHOICE") {
-        Some(n) if (1..=DRUGS.len()).contains(&n.try_into().unwrap()) => DRUGS[(n - 1) as usize],
-        _ => return,
-    };
+    let n = read_int::<usize>("CHOICE", 0..=DRUGS.len());
+    if n == 0 {
+        return;
+    }
+    let drug = DRUGS[n - 1];
     let price = g.prices[drug];
     let max_buy = (g.cash / price).min(g.coat_free());
     println!(
@@ -609,19 +655,12 @@ fn buy(g: &mut Game) {
         pause();
         return;
     }
-    let amt = match ri(&format!("HOW MUCH {drug} (max {max_buy})")) {
-        Some(n) if n > 0 && n <= max_buy => n,
-        Some(0) => return,
-        _ => {
-            println!("  INVALID.");
-            pause();
-            return;
-        }
-    };
-    g.cash -= amt * price;
-    g.coat[drug] += amt;
-    println!("  BOUGHT {amt} {drug} FOR ${}.", amt * price);
-    pause();
+    let amt = read_int::<i64>(&format!("HOW MUCH {drug} (max {max_buy})"), 0..=max_buy);
+    if amt > 0 {
+        let cost = g.buy_drug(drug, amt).unwrap();
+        println!("  BOUGHT {amt} {drug} FOR {}.", money(cost));
+        pause();
+    }
 }
 
 fn sell(g: &mut Game) {
@@ -646,30 +685,23 @@ fn sell(g: &mut Game) {
         }
     }
     println!("    0. CANCEL");
-    let drug = match ri("CHOICE") {
-        Some(n) if (1..=DRUGS.len()).contains(&(n as usize)) => DRUGS[(n - 1) as usize],
-        _ => return,
-    };
+    let n = read_int::<usize>("CHOICE", 0..=DRUGS.len());
+    if n == 0 {
+        return;
+    }
+    let drug = DRUGS[n - 1];
     let have = g.coat[drug];
     if have == 0 {
         println!("  YOU DON'T HAVE ANY {drug}.");
         pause();
         return;
     }
-    let amt = match ri(&format!("HOW MANY {drug} (max {have})")) {
-        Some(n) if n > 0 && n <= have => n,
-        Some(0) => return,
-        _ => {
-            println!("  INVALID.");
-            pause();
-            return;
-        }
-    };
-    let earned = amt * g.prices[drug];
-    g.cash += earned;
-    g.coat[drug] -= amt;
-    println!("  SOLD {amt} {drug} FOR ${earned}.");
-    pause();
+    let amt = read_int::<i64>(&format!("HOW MANY {drug} (max {have})"), 0..=have);
+    if amt>0 {
+        let earned = g.sell_drug(drug, amt).unwrap();
+        println!("  SOLD {amt} {drug} FOR {}.", money(earned));
+        pause();
+    }
 }
 
 fn jet(g: &mut Game, r: &mut Rng) -> bool {
@@ -682,10 +714,11 @@ fn jet(g: &mut Game, r: &mut Rng) -> bool {
     }
     println!("    0. STAY");
     println!();
-    let dest = match ri("WHERE TO") {
-        Some(n) if (1..=LOCATIONS.len()).contains(&(n as usize)) => LOCATIONS[(n - 1) as usize],
-        _ => return false,
-    };
+    let n = read_int::<usize>("WHERE TO", 0..=LOCATIONS.len());
+    if n == 0 {
+        return false;
+    }
+    let dest = LOCATIONS[n - 1];
     if dest == g.loc {
         println!("  YOU'RE ALREADY THERE !");
         pause();
@@ -695,7 +728,7 @@ fn jet(g: &mut Game, r: &mut Rng) -> bool {
     g.loc = dest;
     g.day += 1;
     g.debt = (g.debt as f64 * (1.0 + LOAN_INTEREST)) as i64;
-    g.prices = gen_prices(r);
+    g.gen_prices(r);
     if g.day <= GAME_DAYS {
         if events(g, r) {
             return true;
@@ -722,40 +755,32 @@ fn loan_shark(g: &mut Game) {
         println!();
         println!("  1. REPAY DEBT\n  2. BORROW MORE\n  3. LEAVE");
         println!();
-        match ri("CHOICE") {
-            Some(1) => {
+        match read_int::<usize>("CHOICE", 1..=3) {
+            1 => {
                 if g.debt == 0 {
                     println!("  NO DEBT !");
                     pause();
                     continue;
                 }
-                let amt = match ri(&format!("REPAY HOW MUCH (max ${})", g.debt.min(g.cash))) {
-                    Some(n) => n,
-                    None => continue,
-                };
-                if amt <= 0 || amt > g.cash || amt > g.debt {
-                    println!("  INVALID.");
-                    pause();
-                    continue;
-                }
+                let mx = g.debt.min(g.cash);
+                let amt = read_int::<i64>(&format!("REPAY HOW MUCH (max {})", money(mx)), 0..=mx);
                 g.debt -= amt;
                 g.cash -= amt;
-                println!("  DEBT NOW: ${}", g.debt);
+                println!("  DEBT NOW: {}", money(g.debt));
                 pause();
             }
-            Some(2) => {
-                let amt = match ri(&format!("BORROW HOW MUCH (max ${})", MAX_BORROW)) {
-                    Some(n) => n,
-                    None => continue,
-                };
-                if amt <= 0 || amt > MAX_BORROW {
+            2 => {
+                let amt = read_int::<i64>(
+                    &format!("BORROW HOW MUCH (max {})", money(MAX_BORROW)),
+                    0..=i64::MAX,
+                );
+                if amt == 0 || amt > MAX_BORROW {
                     println!("  YOU THINK HE IS CRAZY MAN !!!");
-                    pause();
-                    continue;
+                } else {
+                    g.debt += amt;
+                    g.cash += amt;
+                    println!("  BORROWED {}.  DEBT: {}", money(amt), money(g.debt));
                 }
-                g.debt += amt;
-                g.cash += amt;
-                println!("  BORROWED ${}.  DEBT: ${}", amt, g.debt);
                 pause();
             }
             _ => break,
@@ -778,32 +803,22 @@ fn bank(g: &mut Game) {
         println!();
         println!("  1. DEPOSIT\n  2. WITHDRAW\n  3. LEAVE");
         println!();
-        match ri("CHOICE") {
-            Some(1) => {
-                let amt = match ri(&format!("DEPOSIT HOW MUCH (max ${})", g.cash)) {
-                    Some(n) => n,
-                    None => continue,
-                };
-                if amt <= 0 || amt > g.cash {
-                    println!("  INVALID.");
-                    pause();
-                    continue;
-                }
+        match read_int::<usize>("CHOICE", 1..=3) {
+            1 => {
+                let amt = read_int::<i64>(
+                    &format!("DEPOSIT HOW MUCH (max {})", money(g.cash)),
+                    0..=g.cash,
+                );
                 g.bank += amt;
                 g.cash -= amt;
                 println!("  DEPOSITED {}.  ACCOUNT: {}", money(amt), money(g.bank));
                 pause();
             }
-            Some(2) => {
-                let amt = match ri(&format!("WITHDRAW HOW MUCH (max {})", money(g.bank))) {
-                    Some(n) => n,
-                    None => continue,
-                };
-                if amt <= 0 || amt > g.bank {
-                    println!("  INVALID.");
-                    pause();
-                    continue;
-                }
+            2 => {
+                let amt = read_int::<i64>(
+                    &format!("WITHDRAW HOW MUCH (max {})", money(g.bank)),
+                    0..=g.bank,
+                );
                 g.bank -= amt;
                 g.cash += amt;
                 println!("  WITHDREW {}.  ACCOUNT: {}", money(amt), money(g.bank));
@@ -828,41 +843,45 @@ fn stash_menu(g: &mut Game) {
         show_coat(g);
         println!("  1. MOVE TO STASH\n  2. TAKE FROM STASH\n  3. LEAVE");
         println!();
-        match ri("CHOICE") {
-            Some(1) => {
+        match read_int::<usize>("CHOICE", 1..=3) {
+            1 => {
                 println!("  WHICH DRUG TO STASH ?");
                 for drug in DRUGS {
                     if g.coat[drug] > 0 {
                         println!("    {}. {drug} ({})", drug as usize + 1, g.coat[drug]);
                     }
                 }
-                let drug = match ri("DRUG (1-6, 0=cancel)") {
-                    Some(n) if n > 0 && n as usize <= DRUGS.len() => DRUGS[(n - 1) as usize],
-                    _ => continue,
-                };
+                let m = DRUGS.len();
+                let msg = format!("DRUG (1-{m}, 0=cancel)");
+                let n = read_int::<usize>(&msg, 0..=m);
+                if n == 0 {
+                    continue;
+                }
+                let drug = DRUGS[n - 1];
                 if g.coat[drug] == 0 {
                     continue;
                 }
-                let amt = match ri(&format!("HOW MANY (max {})", g.coat[drug])) {
-                    Some(n) if n > 0 && n <= g.coat[drug] => n,
-                    _ => continue,
-                };
+                let mx = g.coat[drug];
+                let amt = read_int::<i64>(&format!("HOW MANY (max {mx})"), 0..=mx);
                 g.coat[drug] -= amt;
                 g.stash[drug] += amt;
                 println!("  MOVED {amt} {drug} TO STASH.");
                 pause();
             }
-            Some(2) => {
+            2 => {
                 println!("  WHICH DRUG TO TAKE ?");
                 for drug in DRUGS {
                     if g.stash[drug] > 0 {
                         println!("    {}. {drug} ({})", drug as usize + 1, g.stash[drug]);
                     }
                 }
-                let drug = match ri("DRUG (1-6, 0=cancel)") {
-                    Some(n) if (1..=DRUGS.len()).contains(&(n as usize)) => DRUGS[n as usize - 1],
-                    _ => continue,
-                };
+                let m = DRUGS.len();
+                let msg = format!("DRUG (1-{m}, 0=cancel)");
+                let n = read_int::<usize>(&msg, 0..=m);
+                if n == 0 {
+                    continue;
+                }
+                let drug = DRUGS[n - 1];
                 if g.stash[drug] == 0 {
                     continue;
                 }
@@ -872,10 +891,7 @@ fn stash_menu(g: &mut Game) {
                     pause();
                     continue;
                 }
-                let amt = match ri(&format!("HOW MANY (max {mxt})")) {
-                    Some(n) if n > 0 && n <= mxt => n,
-                    _ => continue,
-                };
+                let amt = read_int::<i64>(&format!("HOW MANY (max {mxt})"), 0..=mxt);
                 g.stash[drug] -= amt;
                 g.coat[drug] += amt;
                 println!("  MOVED {amt} {drug} TO COAT.");
@@ -913,7 +929,7 @@ fn game_over(g: &Game, cause: &str) {
 // ─── MAIN ────────────────────────────────────────────────────────────────────
 fn play(r: &mut Rng) {
     let mut g = Game::new();
-    g.prices = gen_prices(r);
+    g.gen_prices(r);
     loop {
         if g.day > GAME_DAYS {
             game_over(&g, "YOUR MONTH IS UP !");
@@ -1012,7 +1028,6 @@ fn instructions() {
     println!("  The Loan Shark and Bank are only available in the Bronx.");
     println!("  The Loan Shark charges 10% interest per day - pay him back!");
     println!();
-
     pause();
 }
 
