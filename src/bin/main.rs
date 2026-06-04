@@ -208,7 +208,7 @@ impl Game {
     }
 
     pub fn sell_drug(&mut self, drug: Drug, amount: i64) -> Result<i64, &'static str> {
-        if self.coat[drug]<amount {
+        if self.coat[drug] < amount {
             return Err("Not enough drug in trench coat.");
         }
 
@@ -404,10 +404,10 @@ fn events(g: &mut Game, r: &mut Rng) -> bool {
             let pct = r.range(10, 30);
             let mut dropped = false;
             for drug in DRUGS {
-                if g.coat[drug]>0 {
+                if g.coat[drug] > 0 {
                     let d = g.coat[drug] * pct / 100;
                     g.coat[drug] = (g.coat[drug] - d).max(0);
-                    if d>0 {
+                    if d > 0 {
                         dropped = true
                     }
                 }
@@ -483,20 +483,22 @@ fn events(g: &mut Game, r: &mut Rng) -> bool {
                 pause();
             }
         }
-        14 | 15 if g.cash >= 400 => {
-            let gi = r.range(0, 3) as usize;
+        14 | 15 => {
+            let gi = r.range(0, GUNS.len() as i64 - 1) as usize;
             let (gn, gp) = GUNS[gi];
-            cls();
-            hdr("OPPORTUNITY !!");
-            println!("  WILL YOU BUY A {gn} FOR ${gp} ?");
-            print!("  (Y/N): ");
-            let _ = io::stdout().flush();
-            if rl().starts_with('Y') && g.cash >= gp {
-                g.guns += 1;
-                g.cash -= gp;
-                g.coat_size = (g.coat_size - 5).max(g.coat.total());
-                println!("  YOU NOW HAVE {} GUN(S).", g.guns);
-                pause();
+            if g.cash >= gp {
+                cls();
+                hdr("OPPORTUNITY !!");
+                println!("  WILL YOU BUY A {gn} FOR ${gp} ?");
+                print!("  (Y/N): ");
+                let _ = io::stdout().flush();
+                if rl().starts_with('Y') && g.cash >= gp {
+                    g.guns += 1;
+                    g.cash -= gp;
+                    g.coat_size = (g.coat_size - 5).max(g.coat.total());
+                    println!("  YOU NOW HAVE {} GUN(S).", g.guns);
+                    pause();
+                }
             }
         }
         _ => {}
@@ -698,7 +700,7 @@ fn sell(g: &mut Game) {
         return;
     }
     let amt = read_int::<i64>(&format!("HOW MANY {drug} (max {have})"), 0..=have);
-    if amt>0 {
+    if amt > 0 {
         let earned = g.sell_drug(drug, amt).unwrap();
         println!("  SOLD {amt} {drug} FOR {}.", money(earned));
         pause();
