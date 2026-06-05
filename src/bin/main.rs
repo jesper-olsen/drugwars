@@ -138,10 +138,15 @@ struct Game {
     guns: u32,
     damage: i32,
     prices: DrugCounter,
+    r: Rng,
 }
 
 impl Game {
     fn new() -> Self {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos() as u64;
         Game {
             cash: STARTING_CASH,
             bank: 0,
@@ -154,6 +159,7 @@ impl Game {
             guns: 0,
             damage: 0,
             prices: DrugCounter::default(),
+            r: Rng::new(seed ^ 0xDEAD_BEEF_1984_CAFE),
         }
     }
     fn coat_free(&self) -> i64 {
@@ -186,9 +192,9 @@ impl Game {
         }
     }
 
-    fn gen_prices(&mut self, r: &mut Rng) {
+    fn gen_prices(&mut self) {
         for (i, &(lo, hi)) in DRUG_PRICES.iter().enumerate() {
-            self.prices.0[i] = r.range(lo, hi);
+            self.prices.0[i] = self.r.range(lo, hi);
         }
     }
 
@@ -237,7 +243,7 @@ fn rl() -> String {
     s.trim().to_uppercase()
 }
 
-fn read_int<T>(prompt: &str, range: RangeInclusive<T>) -> T
+fn get_int<T>(prompt: &str, range: RangeInclusive<T>) -> T
 where
     T: std::str::FromStr,
     T: PartialOrd,
@@ -345,16 +351,16 @@ fn show_stash(g: &Game) {
 }
 
 // ─── RANDOM EVENTS ───────────────────────────────────────────────────────────
-fn events(g: &mut Game, r: &mut Rng) -> bool {
+fn events(g: &mut Game) -> bool {
     // returns true = dead
-    let d = r.range(0, 20);
+    let d = g.r.range(0, 20);
     match d {
         // 6 blanks out of 21
         1 => {
             cls();
             hdr("!! SPECIAL BULLETIN !!");
             println!("  COPS MADE A BIG COKE BUST !!\n  PRICES ARE OUTRAGEOUS !!");
-            g.prices[Drug::Cocain] = r.range(80_000, 140_000);
+            g.prices[Drug::Cocain] = g.r.range(80_000, 140_000);
             pause();
         }
         2 => {
@@ -363,14 +369,14 @@ fn events(g: &mut Game, r: &mut Rng) -> bool {
             println!(
                 "  COLOMBIAN FREIGHTER DUSTED THE COAST GUARD !!\n  WEED PRICES HAVE BOTTOMED OUT !!"
             );
-            g.prices[Drug::Weed] = r.range(40, 100);
+            g.prices[Drug::Weed] = g.r.range(40, 100);
             pause();
         }
         3 => {
             cls();
             hdr("!! SPECIAL BULLETIN !!");
             println!("  PIGS ARE SELLING CHEAP HEROIN FROM LAST WEEK'S RAID !!");
-            g.prices[Drug::Heroin] = r.range(850, 2000);
+            g.prices[Drug::Heroin] = g.r.range(850, 2000);
             pause();
         }
         4 => {
@@ -379,29 +385,29 @@ fn events(g: &mut Game, r: &mut Rng) -> bool {
             println!(
                 "  RIVAL DRUG DEALERS RAIDED A PHARMACY AND ARE SELLING  C H E A P   L U D E S  !!!"
             );
-            g.prices[Drug::Ludes] = r.range(2, 8);
+            g.prices[Drug::Ludes] = g.r.range(2, 8);
             pause();
         }
         5 => {
             cls();
             hdr("!! SPECIAL BULLETIN !!");
             println!("  ADDICTS ARE BUYING HEROIN AT OUTRAGEOUS PRICES !!");
-            g.prices[Drug::Heroin] = r.range(18_000, 43_000);
+            g.prices[Drug::Heroin] = g.r.range(18_000, 43_000);
             pause();
         }
         6 => {
             cls();
             hdr("!! SPECIAL BULLETIN !!");
             println!("  THE MARKET HAS BEEN FLOODED WITH CHEAP HOME MADE ACID !!!");
-            g.prices[Drug::Acid] = r.range(250, 800);
+            g.prices[Drug::Acid] = g.r.range(250, 800);
             pause();
         }
         7 if g.coat.total() > 0 => {
             cls();
             hdr("!! BUSTED !!");
-            let bl = r.range(2, 6);
+            let bl = g.r.range(2, 6);
             println!("  POLICE DOGS CHASE YOU FOR {bl} BLOCKS !!");
-            let pct = r.range(10, 30);
+            let pct = g.r.range(10, 30);
             let mut dropped = false;
             for drug in DRUGS {
                 if g.coat[drug] > 0 {
@@ -434,16 +440,16 @@ fn events(g: &mut Game, r: &mut Rng) -> bool {
             let lost = g.cash / 3;
             g.cash -= lost;
             println!(
-                "  YOU WERE MUGGED IN THE SUBWAY !!\n  YOU LOST ${} !!",
-                lost
+                "  YOU WERE MUGGED IN THE SUBWAY !!\n  YOU LOST {} !!",
+                money(lost)
             );
             pause();
         }
         10 => {
             let free = g.coat_free();
             if free >= 3 {
-                let amt = r.range(3, 8).min(free);
-                let di = r.range(0, (DRUGS.len() - 1) as i64) as usize;
+                let amt = g.r.range(3, 8).min(free);
+                let di = g.r.range(0, (DRUGS.len() - 1) as i64) as usize;
                 let drug = DRUGS[di];
                 cls();
                 hdr("LUCKY FIND !!");
@@ -484,7 +490,7 @@ fn events(g: &mut Game, r: &mut Rng) -> bool {
             }
         }
         14 | 15 => {
-            let gi = r.range(0, GUNS.len() as i64 - 1) as usize;
+            let gi = g.r.range(0, GUNS.len() as i64 - 1) as usize;
             let (gn, gp) = GUNS[gi];
             if g.cash >= gp {
                 cls();
@@ -507,12 +513,12 @@ fn events(g: &mut Game, r: &mut Rng) -> bool {
 }
 
 // ─── POLICE ENCOUNTER ────────────────────────────────────────────────────────
-fn police(g: &mut Game, r: &mut Rng) -> bool {
+fn police(g: &mut Game) -> bool {
     // true = dead/arrested
     if g.coat.total() < 5 {
         return false;
     }
-    let nd = r.range(1, 4) as u32;
+    let nd = g.r.range(1, 4) as u32;
     let mut cops = nd + 1;
     cls();
     hdr("POLICE ENCOUNTER !!");
@@ -533,7 +539,7 @@ fn police(g: &mut Game, r: &mut Rng) -> bool {
 
         if ch.starts_with('R') {
             cls();
-            if r.bool() {
+            if g.r.bool() {
                 println!("  YOU LOST THEM IN THE ALLEYS !!");
                 pause();
                 offer_doctor(g);
@@ -541,7 +547,7 @@ fn police(g: &mut Game, r: &mut Rng) -> bool {
             } else {
                 println!("  YOU CAN'T LOSE THEM !!");
                 pause();
-                if cops_shoot(g, r, cops) {
+                if cops_shoot(g, cops) {
                     return true;
                 }
             }
@@ -551,14 +557,14 @@ fn police(g: &mut Game, r: &mut Rng) -> bool {
             if g.guns == 0 {
                 println!("  BUT YOU DON'T HAVE ANY GUNS !!");
                 pause();
-                if cops_shoot(g, r, cops) {
+                if cops_shoot(g, cops) {
                     return true;
                 }
-            } else if r.bool() {
+            } else if g.r.bool() {
                 println!("  YOU KILLED ONE !!");
                 cops -= 1;
                 if cops == 0 {
-                    let bounty = r.range(500, 2000);
+                    let bounty = g.r.range(500, 2000);
                     g.cash += bounty;
                     cls();
                     println!("  YOU KILLED ALL OF THEM !!!!");
@@ -571,13 +577,13 @@ fn police(g: &mut Game, r: &mut Rng) -> bool {
                     return false;
                 }
                 pause();
-                if cops_shoot(g, r, cops) {
+                if cops_shoot(g, cops) {
                     return true;
                 }
             } else {
                 println!("  YOU MISSED THEM !!");
                 pause();
-                if cops_shoot(g, r, cops) {
+                if cops_shoot(g, cops) {
                     return true;
                 }
             }
@@ -603,10 +609,10 @@ fn offer_doctor(g: &mut Game) {
 }
 
 // return true if dead
-fn cops_shoot(g: &mut Game, r: &mut Rng, cops: u32) -> bool {
+fn cops_shoot(g: &mut Game, cops: u32) -> bool {
     cls();
     println!("  THEY ARE FIRING ON YOU MAN !!");
-    let hit = (0..cops).any(|_| r.bool());
+    let hit = (0..cops).any(|_| g.r.bool());
 
     if hit {
         println!("  YOU'VE BEEN HIT !!");
@@ -641,7 +647,7 @@ fn buy(g: &mut Game) {
         println!("    {}. {drug:<12} {price:>8}", drug as usize + 1);
     }
     println!("    0. CANCEL");
-    let n = read_int::<usize>("CHOICE", 0..=DRUGS.len());
+    let n = get_int::<usize>("CHOICE", 0..=DRUGS.len());
     if n == 0 {
         return;
     }
@@ -658,7 +664,7 @@ fn buy(g: &mut Game) {
         pause();
         return;
     }
-    let amt = read_int::<i64>(&format!("HOW MUCH {drug} (max {max_buy})"), 0..=max_buy);
+    let amt = get_int::<i64>(&format!("HOW MUCH {drug} (max {max_buy})"), 0..=max_buy);
     if amt > 0 {
         let cost = g.buy_drug(drug, amt).unwrap();
         println!("  BOUGHT {amt} {drug} FOR {}.", money(cost));
@@ -688,7 +694,7 @@ fn sell(g: &mut Game) {
         }
     }
     println!("    0. CANCEL");
-    let n = read_int::<usize>("CHOICE", 0..=DRUGS.len());
+    let n = get_int::<usize>("CHOICE", 0..=DRUGS.len());
     if n == 0 {
         return;
     }
@@ -699,7 +705,7 @@ fn sell(g: &mut Game) {
         pause();
         return;
     }
-    let amt = read_int::<i64>(&format!("HOW MANY {drug} (max {have})"), 0..=have);
+    let amt = get_int::<i64>(&format!("HOW MANY {drug} (max {have})"), 0..=have);
     if amt > 0 {
         let earned = g.sell_drug(drug, amt).unwrap();
         println!("  SOLD {amt} {drug} FOR {}.", money(earned));
@@ -707,7 +713,7 @@ fn sell(g: &mut Game) {
     }
 }
 
-fn jet(g: &mut Game, r: &mut Rng) -> bool {
+fn jet(g: &mut Game) -> bool {
     // true = dead
     cls();
     hdr("JET - WHERE TO, DUDE ?");
@@ -717,7 +723,7 @@ fn jet(g: &mut Game, r: &mut Rng) -> bool {
     }
     println!("    0. STAY");
     println!();
-    let n = read_int::<usize>("WHERE TO", 0..=LOCATIONS.len());
+    let n = get_int::<usize>("WHERE TO", 0..=LOCATIONS.len());
     if n == 0 {
         return false;
     }
@@ -731,12 +737,12 @@ fn jet(g: &mut Game, r: &mut Rng) -> bool {
     g.loc = dest;
     g.day += 1;
     g.debt = (g.debt as f64 * (1.0 + LOAN_INTEREST)) as i64;
-    g.gen_prices(r);
+    g.gen_prices();
     if g.day <= GAME_DAYS {
-        if events(g, r) {
+        if events(g) {
             return true;
         }
-        if g.coat.total() >= 5 && r.range(0, 3) == 0 && police(g, r) {
+        if g.coat.total() >= 5 && g.r.range(0, 3) == 0 && police(g) {
             return true;
         }
     }
@@ -758,7 +764,7 @@ fn loan_shark(g: &mut Game) {
         println!();
         println!("  1. REPAY DEBT\n  2. BORROW MORE\n  3. LEAVE");
         println!();
-        match read_int::<usize>("CHOICE", 1..=3) {
+        match get_int::<usize>("CHOICE", 1..=3) {
             1 => {
                 if g.debt == 0 {
                     println!("  NO DEBT !");
@@ -766,14 +772,14 @@ fn loan_shark(g: &mut Game) {
                     continue;
                 }
                 let mx = g.debt.min(g.cash);
-                let amt = read_int::<i64>(&format!("REPAY HOW MUCH (max {})", money(mx)), 0..=mx);
+                let amt = get_int::<i64>(&format!("REPAY HOW MUCH (max {})", money(mx)), 0..=mx);
                 g.debt -= amt;
                 g.cash -= amt;
                 println!("  DEBT NOW: {}", money(g.debt));
                 pause();
             }
             2 => {
-                let amt = read_int::<i64>(
+                let amt = get_int::<i64>(
                     &format!("BORROW HOW MUCH (max {})", money(MAX_BORROW)),
                     0..=i64::MAX,
                 );
@@ -806,9 +812,9 @@ fn bank(g: &mut Game) {
         println!();
         println!("  1. DEPOSIT\n  2. WITHDRAW\n  3. LEAVE");
         println!();
-        match read_int::<usize>("CHOICE", 1..=3) {
+        match get_int::<usize>("CHOICE", 1..=3) {
             1 => {
-                let amt = read_int::<i64>(
+                let amt = get_int::<i64>(
                     &format!("DEPOSIT HOW MUCH (max {})", money(g.cash)),
                     0..=g.cash,
                 );
@@ -818,7 +824,7 @@ fn bank(g: &mut Game) {
                 pause();
             }
             2 => {
-                let amt = read_int::<i64>(
+                let amt = get_int::<i64>(
                     &format!("WITHDRAW HOW MUCH (max {})", money(g.bank)),
                     0..=g.bank,
                 );
@@ -846,7 +852,7 @@ fn stash_menu(g: &mut Game) {
         show_coat(g);
         println!("  1. MOVE TO STASH\n  2. TAKE FROM STASH\n  3. LEAVE");
         println!();
-        match read_int::<usize>("CHOICE", 1..=3) {
+        match get_int::<usize>("CHOICE", 1..=3) {
             1 => {
                 println!("  WHICH DRUG TO STASH ?");
                 for drug in DRUGS {
@@ -856,7 +862,7 @@ fn stash_menu(g: &mut Game) {
                 }
                 let m = DRUGS.len();
                 let msg = format!("DRUG (1-{m}, 0=cancel)");
-                let n = read_int::<usize>(&msg, 0..=m);
+                let n = get_int::<usize>(&msg, 0..=m);
                 if n == 0 {
                     continue;
                 }
@@ -865,7 +871,7 @@ fn stash_menu(g: &mut Game) {
                     continue;
                 }
                 let mx = g.coat[drug];
-                let amt = read_int::<i64>(&format!("HOW MANY (max {mx})"), 0..=mx);
+                let amt = get_int::<i64>(&format!("HOW MANY (max {mx})"), 0..=mx);
                 g.coat[drug] -= amt;
                 g.stash[drug] += amt;
                 println!("  MOVED {amt} {drug} TO STASH.");
@@ -880,7 +886,7 @@ fn stash_menu(g: &mut Game) {
                 }
                 let m = DRUGS.len();
                 let msg = format!("DRUG (1-{m}, 0=cancel)");
-                let n = read_int::<usize>(&msg, 0..=m);
+                let n = get_int::<usize>(&msg, 0..=m);
                 if n == 0 {
                     continue;
                 }
@@ -894,7 +900,7 @@ fn stash_menu(g: &mut Game) {
                     pause();
                     continue;
                 }
-                let amt = read_int::<i64>(&format!("HOW MANY (max {mxt})"), 0..=mxt);
+                let amt = get_int::<i64>(&format!("HOW MANY (max {mxt})"), 0..=mxt);
                 g.stash[drug] -= amt;
                 g.coat[drug] += amt;
                 println!("  MOVED {amt} {drug} TO COAT.");
@@ -930,9 +936,9 @@ fn game_over(g: &Game, cause: &str) {
 }
 
 // ─── MAIN ────────────────────────────────────────────────────────────────────
-fn play(r: &mut Rng) {
+fn play() {
     let mut g = Game::new();
-    g.gen_prices(r);
+    g.gen_prices();
     loop {
         if g.day > GAME_DAYS {
             game_over(&g, "YOUR MONTH IS UP !");
@@ -961,7 +967,7 @@ fn play(r: &mut Rng) {
         match rl().as_str() {
             "B" => buy(&mut g),
             "S" => sell(&mut g),
-            "J" if jet(&mut g, r) => {
+            "J" if jet(&mut g) => {
                 game_over(&g, "THEY WASTED YOU MAN !!!  WHAT A DRAG !!!");
                 return;
             }
@@ -984,8 +990,7 @@ fn play(r: &mut Rng) {
     }
 }
 
-fn title(r: &mut Rng) {
-    let _ = r;
+fn title() {
     cls();
     println!();
     println!("  ╔═══════════════════════════════════════════════╗");
@@ -1000,12 +1005,6 @@ fn title(r: &mut Rng) {
     println!("  ║                                               ║");
     println!("  ╚═══════════════════════════════════════════════╝");
     println!();
-    //The original DOS game needed this to seed the PRNG
-    //println!("  PRESS ANY KEY TO BEGIN RANDOMIZING");
-    //rl();
-    //println!("  RANDOMIZING...  PRESS ANY KEY TO STOP");
-    //rl();
-    //println!("  DONE.");
     println!();
 }
 
@@ -1037,20 +1036,14 @@ fn instructions() {
 }
 
 fn main() {
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos() as u64;
-    let mut r = Rng::new(seed ^ 0xDEAD_BEEF_1984_CAFE);
-
     loop {
-        title(&mut r);
+        title();
         print!("  DO YOU WANT INSTRUCTIONS ? (Y/N): ");
         let _ = io::stdout().flush();
         if rl().starts_with('Y') {
             instructions();
         }
-        play(&mut r);
+        play();
         println!();
         print!("  PLAY AGAIN ? (Y/N): ");
         let _ = io::stdout().flush();
@@ -1061,10 +1054,5 @@ fn main() {
             println!("  Rust port for preservation purposes.\n");
             break;
         }
-        let ns = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos() as u64;
-        r = Rng::new(ns ^ 0xCAFE_1984);
     }
 }
