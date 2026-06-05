@@ -80,13 +80,9 @@ const LOCATIONS: [Location; 6] = [
     Location::Brooklyn,
 ];
 
-const GUNS: [(&str, i64); 4] = [
-    ("SATURDAY NIGHT SPECIAL", 400),
-    ("RUGER", 400),
-    (".38 SPECIAL", 400),
-    ("BARETTA", 400),
-];
+const GUNS: [&str; 4] = ["SATURDAY NIGHT SPECIAL", "RUGER", ".38 SPECIAL", "BARETTA"];
 
+const GUN_COST: i64 = 400;
 const GAME_DAYS: u32 = 30;
 const TRENCH_UPGRADE_COST: i64 = 200;
 const TRENCH_UPGRADE_SLOTS: i64 = 10;
@@ -476,21 +472,19 @@ fn events(g: &mut Game) -> bool {
                 pause();
             }
         }
-        14 | 15 => {
+        14 | 15 if g.cash >= GUN_COST => {
             let gi = g.r.range(0, GUNS.len() as i64 - 1) as usize;
-            let (gn, gp) = GUNS[gi];
-            if g.cash >= gp {
-                cls();
-                hdr("OPPORTUNITY !!");
-                println!("  WILL YOU BUY A {gn} FOR ${gp} ?");
-                print!("  (Y/N): ");
-                if rl().starts_with('Y') && g.cash >= gp {
-                    g.guns += 1;
-                    g.cash -= gp;
-                    g.coat_size = (g.coat_size - 5).max(g.coat.total());
-                    println!("  YOU NOW HAVE {} GUN(S).", g.guns);
-                    pause();
-                }
+            let gn = GUNS[gi];
+            cls();
+            hdr("OPPORTUNITY !!");
+            println!("  WILL YOU BUY A {gn} FOR {} ?", money(GUN_COST));
+            print!("  (Y/N): ");
+            if rl().starts_with('Y') {
+                g.guns += 1;
+                g.cash -= GUN_COST;
+                g.coat_size = (g.coat_size - 5).max(g.coat.total());
+                println!("  YOU NOW HAVE {} GUN(S).", g.guns);
+                pause();
             }
         }
         _ => {}
