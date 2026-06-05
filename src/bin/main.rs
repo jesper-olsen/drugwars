@@ -233,11 +233,11 @@ fn cls() {
 
 fn pause() {
     print!("\n  (PRESS ENTER TO CONTINUE)");
-    let _ = io::stdout().flush();
     rl();
 }
 
 fn rl() -> String {
+    let _ = io::stdout().flush();
     let mut s = String::new();
     let _ = io::stdin().read_line(&mut s);
     s.trim().to_uppercase()
@@ -351,56 +351,45 @@ fn show_stash(g: &Game) {
 }
 
 // ─── RANDOM EVENTS ───────────────────────────────────────────────────────────
+fn special(news: &str) {
+    cls();
+    hdr("!! SPECIAL BULLETIN !!");
+    println!("{news}");
+    pause();
+}
+
 fn events(g: &mut Game) -> bool {
     // returns true = dead
     let d = g.r.range(0, 20);
     match d {
         // 6 blanks out of 21
         1 => {
-            cls();
-            hdr("!! SPECIAL BULLETIN !!");
-            println!("  COPS MADE A BIG COKE BUST !!\n  PRICES ARE OUTRAGEOUS !!");
+            special("  COPS MADE A BIG COKE BUST !!\n  PRICES ARE OUTRAGEOUS !!");
             g.prices[Drug::Cocain] = g.r.range(80_000, 140_000);
-            pause();
         }
         2 => {
-            cls();
-            hdr("!! SPECIAL BULLETIN !!");
-            println!(
-                "  COLOMBIAN FREIGHTER DUSTED THE COAST GUARD !!\n  WEED PRICES HAVE BOTTOMED OUT !!"
+            special(
+                "  COLOMBIAN FREIGHTER DUSTED THE COAST GUARD !!\n  WEED PRICES HAVE BOTTOMED OUT !!",
             );
             g.prices[Drug::Weed] = g.r.range(40, 100);
-            pause();
         }
         3 => {
-            cls();
-            hdr("!! SPECIAL BULLETIN !!");
-            println!("  PIGS ARE SELLING CHEAP HEROIN FROM LAST WEEK'S RAID !!");
+            special("  PIGS ARE SELLING CHEAP HEROIN FROM LAST WEEK'S RAID !!");
             g.prices[Drug::Heroin] = g.r.range(850, 2000);
-            pause();
         }
         4 => {
-            cls();
-            hdr("!! SPECIAL BULLETIN !!");
-            println!(
-                "  RIVAL DRUG DEALERS RAIDED A PHARMACY AND ARE SELLING  C H E A P   L U D E S  !!!"
+            special(
+                "  RIVAL DRUG DEALERS RAIDED A PHARMACY AND ARE SELLING  C H E A P   L U D E S  !!!",
             );
             g.prices[Drug::Ludes] = g.r.range(2, 8);
-            pause();
         }
         5 => {
-            cls();
-            hdr("!! SPECIAL BULLETIN !!");
-            println!("  ADDICTS ARE BUYING HEROIN AT OUTRAGEOUS PRICES !!");
+            special("  ADDICTS ARE BUYING HEROIN AT OUTRAGEOUS PRICES !!");
             g.prices[Drug::Heroin] = g.r.range(18_000, 43_000);
-            pause();
         }
         6 => {
-            cls();
-            hdr("!! SPECIAL BULLETIN !!");
-            println!("  THE MARKET HAS BEEN FLOODED WITH CHEAP HOME MADE ACID !!!");
+            special("  THE MARKET HAS BEEN FLOODED WITH CHEAP HOME MADE ACID !!!");
             g.prices[Drug::Acid] = g.r.range(250, 800);
-            pause();
         }
         7 if g.coat.total() > 0 => {
             cls();
@@ -465,7 +454,6 @@ fn events(g: &mut Game) -> bool {
             println!("  THERE IS SOME WEED THAT SMELLS LIKE PARAQUAT HERE !!");
             println!("  IT LOOKS GOOD !!");
             print!("\n  WILL YOU SMOKE IT ? (Y/N): ");
-            let _ = io::stdout().flush();
             if rl().starts_with('Y') {
                 cls();
                 println!(
@@ -481,7 +469,6 @@ fn events(g: &mut Game) -> bool {
             hdr("OPPORTUNITY !!");
             println!("  WILL YOU BUY A NEW TRENCH COAT WITH MORE POCKETS");
             print!("  FOR {} ? (Y/N): ", money(TRENCH_UPGRADE_COST));
-            let _ = io::stdout().flush();
             if rl().starts_with('Y') {
                 g.coat_size += TRENCH_UPGRADE_SLOTS;
                 g.cash -= TRENCH_UPGRADE_COST;
@@ -497,7 +484,6 @@ fn events(g: &mut Game) -> bool {
                 hdr("OPPORTUNITY !!");
                 println!("  WILL YOU BUY A {gn} FOR ${gp} ?");
                 print!("  (Y/N): ");
-                let _ = io::stdout().flush();
                 if rl().starts_with('Y') && g.cash >= gp {
                     g.guns += 1;
                     g.cash -= gp;
@@ -514,7 +500,7 @@ fn events(g: &mut Game) -> bool {
 
 // ─── POLICE ENCOUNTER ────────────────────────────────────────────────────────
 fn police(g: &mut Game) -> bool {
-    // true = dead/arrested
+    // true => dead/arrested
     if g.coat.total() < 5 {
         return false;
     }
@@ -534,7 +520,6 @@ fn police(g: &mut Game) -> bool {
         div();
         println!();
         print!("  WILL YOU [R]UN OR [F]IGHT ? (R/F): ");
-        let _ = io::stdout().flush();
         let ch = rl();
 
         if ch.starts_with('R') {
@@ -598,7 +583,6 @@ fn offer_doctor(g: &mut Game) {
             "  WILL YOU PAY {} TO HAVE A DOCTOR SEW YOU UP ? (Y/N): ",
             money(DOCTOR_COST)
         );
-        let _ = io::stdout().flush();
         if rl().starts_with('Y') {
             g.cash -= DOCTOR_COST;
             g.damage = 0;
@@ -714,7 +698,7 @@ fn sell(g: &mut Game) {
 }
 
 fn jet(g: &mut Game) -> bool {
-    // true = dead
+    // true => dead
     cls();
     hdr("JET - WHERE TO, DUDE ?");
     for loc in LOCATIONS {
@@ -963,7 +947,6 @@ fn play() {
         println!();
 
         print!("  > ");
-        let _ = io::stdout().flush();
         match rl().as_str() {
             "B" => buy(&mut g),
             "S" => sell(&mut g),
@@ -1039,15 +1022,12 @@ fn main() {
     loop {
         title();
         print!("  DO YOU WANT INSTRUCTIONS ? (Y/N): ");
-        let _ = io::stdout().flush();
         if rl().starts_with('Y') {
             instructions();
         }
         play();
-        println!();
-        print!("  PLAY AGAIN ? (Y/N): ");
-        let _ = io::stdout().flush();
-        if !rl().starts_with('Y') {
+        print!("\n  PLAY AGAIN ? (Y/N): ");
+        if rl().starts_with('N') {
             cls();
             println!("  THANKS FOR PLAYING !\n");
             println!("  DRUG WARS  --  COPYRIGHT (1984) JOHN E. DELL");
