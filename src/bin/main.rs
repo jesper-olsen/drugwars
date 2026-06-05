@@ -163,7 +163,7 @@ impl Game {
     }
 
     pub fn net_worth(&self) -> i64 {
-        // Stash drugs are abandoned at game end - not counted.
+        // drugs are abandoned at game end - not counted.
         self.cash + self.bank - self.debt
     }
 
@@ -330,6 +330,7 @@ fn show_coat(g: &Game) {
     println!("    {:<12} {}", "FREE SPACE", g.coat_free());
     println!();
 }
+
 fn show_stash(g: &Game) {
     println!("  STASH (BRONX):");
     println!();
@@ -893,7 +894,9 @@ fn stash_menu(g: &mut Game) {
 fn game_over(g: &Game, cause: &str) {
     cls();
     hdr("GAME OVER");
-    println!("  {cause}");
+    if cause != "" {
+        println!("  {cause}");
+    }
     println!();
 
     println!("  FINAL TALLY:");
@@ -945,7 +948,7 @@ fn play() {
             "B" => buy(&mut g),
             "S" => sell(&mut g),
             "J" if jet(&mut g) => {
-                game_over(&g, "THEY WASTED YOU MAN !!!  WHAT A DRAG !!!");
+                game_over(&g, "");
                 return;
             }
             "L" => loan_shark(&mut g),
