@@ -355,8 +355,7 @@ fn special(news: &str) {
     pause();
 }
 
-fn events(g: &mut Game) -> bool {
-    // returns true = dead
+fn events(g: &mut Game) -> Result<(), &'static str> {
     let d = g.r.range(0, 20);
     match d {
         // 6 blanks out of 21
@@ -458,7 +457,7 @@ fn events(g: &mut Game) -> bool {
                 );
                 println!("\n  THEN YOU DIE BECAUSE YOUR BRAIN HAS DISINTEGRATED !!!");
                 pause();
-                return true;
+                return Err("PARAQUAT DEATH!!!");
             }
         }
         12 | 13 if g.cash >= TRENCH_UPGRADE_COST => {
@@ -490,14 +489,13 @@ fn events(g: &mut Game) -> bool {
         }
         _ => {}
     }
-    false
+    Ok(())
 }
 
 // ─── POLICE ENCOUNTER ────────────────────────────────────────────────────────
-fn police(g: &mut Game) -> bool {
-    // true => dead/arrested
+fn police(g: &mut Game) -> Result<(), &'static str> {
     if g.coat.total() < 5 {
-        return false;
+        return Ok(());
     }
     let nd = g.r.range(1, 4) as u32;
     let mut cops = nd + 1;
@@ -523,13 +521,11 @@ fn police(g: &mut Game) -> bool {
                 println!("  YOU LOST THEM IN THE ALLEYS !!");
                 pause();
                 offer_doctor(g);
-                return false;
+                return Ok(());
             } else {
                 println!("  YOU CAN'T LOSE THEM !!");
                 pause();
-                if cops_shoot(g, cops) {
-                    return true;
-                }
+                cops_shoot(g, cops)?;
             }
         } else if ch.starts_with('F') {
             cls();
@@ -537,9 +533,7 @@ fn police(g: &mut Game) -> bool {
             if g.guns == 0 {
                 println!("  BUT YOU DON'T HAVE ANY GUNS !!");
                 pause();
-                if cops_shoot(g, cops) {
-                    return true;
-                }
+                cops_shoot(g, cops)?;
             } else if g.r.bool() {
                 println!("  YOU KILLED ONE !!");
                 cops -= 1;
@@ -554,18 +548,14 @@ fn police(g: &mut Game) -> bool {
                     );
                     pause();
                     offer_doctor(g);
-                    return false;
+                    return Ok(());
                 }
                 pause();
-                if cops_shoot(g, cops) {
-                    return true;
-                }
+                cops_shoot(g, cops)?;
             } else {
                 println!("  YOU MISSED THEM !!");
                 pause();
-                if cops_shoot(g, cops) {
-                    return true;
-                }
+                cops_shoot(g, cops)?;
             }
         }
     }
@@ -587,8 +577,8 @@ fn offer_doctor(g: &mut Game) {
     }
 }
 
-// return true if dead
-fn cops_shoot(g: &mut Game, cops: u32) -> bool {
+// Return Ok(()) if alive, Err("reason") if dead.
+fn cops_shoot(g: &mut Game, cops: u32) -> Result<(), &'static str> {
     cls();
     println!("  THEY ARE FIRING ON YOU MAN !!");
     let hit = (0..cops).any(|_| g.r.bool());
@@ -597,15 +587,14 @@ fn cops_shoot(g: &mut Game, cops: u32) -> bool {
         println!("  YOU'VE BEEN HIT !!");
         g.damage += 1;
         if g.damage >= MAX_DAMAGE {
-            println!("\n  THEY WASTED YOU MAN !!!  WHAT A DRAG !!!");
             pause();
-            return true;
+            return Err("THEY WASTED YOU MAN !!!  WHAT A DRAG !!!");
         }
     } else {
         println!("  THEY MISSED !!");
     }
     pause();
-    false
+    Ok(())
 }
 
 // ─── ACTIONS ─────────────────────────────────────────────────────────────────
@@ -692,7 +681,7 @@ fn sell(g: &mut Game) {
     }
 }
 
-fn jet(g: &mut Game) -> bool {
+fn jet(g: &mut Game) -> Result<(), &'static str> {
     // true => dead
     cls();
     hdr("JET - WHERE TO, DUDE ?");
@@ -704,13 +693,13 @@ fn jet(g: &mut Game) -> bool {
     println!();
     let n = get_int::<usize>("WHERE TO", 0..=LOCATIONS.len());
     if n == 0 {
-        return false;
+        return Ok(());
     }
     let dest = LOCATIONS[n - 1];
     if dest == g.loc {
         println!("  YOU'RE ALREADY THERE !");
         pause();
-        return false;
+        return Ok(());
     }
     println!("\n         . . .  S U B W A Y  . . .\n");
     g.loc = dest;
@@ -718,14 +707,12 @@ fn jet(g: &mut Game) -> bool {
     g.debt = (g.debt as f64 * (1.0 + LOAN_INTEREST)) as i64;
     g.gen_prices();
     if g.day <= GAME_DAYS {
-        if events(g) {
-            return true;
-        }
-        if g.coat.total() >= 5 && g.r.range(0, 3) == 0 && police(g) {
-            return true;
+        events(g)?;
+        if g.coat.total() >= 5 && g.r.range(0, 3) == 0 {
+            police(g)?
         }
     }
-    false
+    Ok(())
 }
 
 fn loan_shark(g: &mut Game) {
@@ -947,10 +934,13 @@ fn play() {
         match rl().as_str() {
             "B" => buy(&mut g),
             "S" => sell(&mut g),
-            "J" if jet(&mut g) => {
-                game_over(&g, "");
-                return;
+            "J" => {
+                if let Err(cause) = jet(&mut g) {
+                    game_over(&g, cause);
+                    return;
+                }
             }
+
             "L" => loan_shark(&mut g),
             "K" => bank(&mut g),
             "T" => stash_menu(&mut g),
