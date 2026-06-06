@@ -101,6 +101,19 @@ impl DrugCounter {
     fn total(&self) -> i64 {
         self.0.iter().sum()
     }
+    fn show(&self) {
+        println!();
+        let mut any = false;
+        for drug in DRUGS {
+            if self[drug] > 0 {
+                println!("    {drug:<12} {}", self[drug]);
+                any = true;
+            }
+        }
+        if !any {
+            println!("    (empty)");
+        }
+    }
 }
 
 impl Default for DrugCounter {
@@ -316,34 +329,14 @@ fn money(n: i64) -> String {
 
 fn show_coat(g: &Game) {
     println!("  TRENCH COAT:");
-    println!();
-    let mut any = false;
-    for drug in DRUGS {
-        if g.coat[drug] > 0 {
-            println!("    {drug:<12} {}", g.coat[drug]);
-            any = true;
-        }
-    }
-    if !any {
-        println!("    (empty)");
-    }
+    g.coat.show();
     println!("    {:<12} {}", "FREE SPACE", g.coat_free());
     println!();
 }
 
 fn show_stash(g: &Game) {
     println!("  STASH (BRONX):");
-    println!();
-    let mut any = false;
-    for drug in DRUGS {
-        if g.stash[drug] > 0 {
-            println!("    {drug:<12} {}", g.stash[drug]);
-            any = true;
-        }
-    }
-    if !any {
-        println!("    (empty)");
-    }
+    g.stash.show();
     println!();
 }
 
