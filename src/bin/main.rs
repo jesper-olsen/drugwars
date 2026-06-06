@@ -881,7 +881,7 @@ fn stash_menu(g: &mut Game) {
 fn game_over(g: &Game, cause: &str) {
     cls();
     hdr("GAME OVER");
-    if cause != "" {
+    if !cause.is_empty() {
         println!("  {cause}");
     }
     println!();
